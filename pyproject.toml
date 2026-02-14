@@ -1,0 +1,35 @@
+[tool.poetry]
+name = "llm-engineering"
+version = "0.1.0"
+description = "MoodSwarm - LLM Twin engineering project"
+authors = ["arkaj"]
+license = "MIT"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "~3.11"
+zenml = { version = "0.74.0", extras = ["server"] }
+pymongo = "^4.6.2"
+click = "^8.0.1"
+loguru = "^0.7.2"
+rich = "^13.7.1"
+pydantic-settings = "^2.0.0"
+poethepoet = "0.29.0"
+qdrant-client = "^1.8.0"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.4.9"
+pre-commit = "^3.7.1"
+pytest = "^8.2.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poe.tasks]
+# Infrastructure
+local-docker-up = "docker compose up -d"
+local-docker-down = "docker compose down"
+
+# Smoke test
+run-smoke-test = "poetry run python -m tools.run --run-smoke-test --no-cache"

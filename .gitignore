@@ -1,0 +1,60 @@
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+*_venv/
+*_myenv/
+
+# Environment variables
+.env
+
+# IDE
+.vscode/**/launch.json
+.idea/
+.claude/
+
+# macOS
+.DS_Store
+
+# Poetry
+#poetry.lock
+
+# pyenv
+.python-version
+
+# ZenML
+.zen/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Data & output
+output/
+sagemaker_*.json
+run_ids.txt
+data/
+*.pdf
+
+instructions/
+instructions.md
+instructionsclude.md
+
+# Logs
+*.log
