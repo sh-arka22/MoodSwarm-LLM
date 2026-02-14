@@ -54,7 +54,8 @@ data/
 
 instructions/
 instructions.md
-instructionsclude.md
+instructionsclaude.md
+CLAUDE.md
 
 # Logs
 *.log
