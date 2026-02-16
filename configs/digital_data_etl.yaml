@@ -1,0 +1,7 @@
+parameters:
+  user_full_name: Paul Iusztin
+  links:
+    # Substack articles (free, no paywall)
+    - https://decodingml.substack.com/p/an-end-to-end-framework-for-production?r=1ttoeh
+    - https://decodingml.substack.com/p/the-llm-twin-free-course-on-production?r=1ttoeh
+    - https://decodingml.substack.com/p/a-blueprint-for-designing-production?r=1ttoeh

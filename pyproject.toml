@@ -17,6 +17,17 @@ pydantic-settings = "^2.0.0"
 poethepoet = "0.29.0"
 qdrant-client = "^1.8.0"
 
+# Digital data ETL (Week 2)
+selenium = "^4.21.0"
+webdriver-manager = "^4.0.1"
+beautifulsoup4 = "^4.12.3"
+html2text = "^2024.2.26"
+chromedriver-autoinstaller = "^0.6.4"
+tqdm = "^4.66.0"
+
+# RAG / LangChain (used by CustomArticleCrawler)
+langchain-community = "^0.2.11"
+
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.4.9"
 pre-commit = "^3.7.1"
@@ -33,3 +44,6 @@ local-docker-down = "docker compose down"
 
 # Smoke test
 run-smoke-test = "poetry run python -m tools.run --run-smoke-test --no-cache"
+
+# ETL pipelines
+run-digital-data-etl = "poetry run python -m tools.run --run-etl --no-cache --etl-config-filename digital_data_etl.yaml"
