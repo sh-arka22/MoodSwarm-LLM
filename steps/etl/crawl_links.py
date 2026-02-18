@@ -1,6 +1,7 @@
 from urllib.parse import urlparse
 
 from loguru import logger
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 from tqdm import tqdm
 from typing_extensions import Annotated
 from zenml import get_step_context, step
@@ -35,11 +36,25 @@ def _crawl_link(dispatcher: CrawlerDispatcher, link: str, user: UserDocument) ->
     crawler_domain = urlparse(link).netloc
 
     try:
-        crawler.extract(link=link, user=user)
+        _crawl_with_retry(crawler, link, user)
         return (True, crawler_domain)
     except Exception as e:
-        logger.error(f"An error occurred while crawling: {e!s}")
+        logger.error(f"Failed to crawl {link} after retries: {e!s}")
         return (False, crawler_domain)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    retry=retry_if_exception_type((ConnectionError, TimeoutError, OSError)),
+    before_sleep=lambda retry_state: logger.warning(
+        f"Crawl attempt {retry_state.attempt_number} failed, retrying in "
+        f"{retry_state.next_action.sleep:.1f}s..."
+    ),
+    reraise=True,
+)
+def _crawl_with_retry(crawler, link: str, user) -> None:
+    crawler.extract(link=link, user=user)
 
 
 def _add_to_metadata(metadata: dict, domain: str, successful_crawl: bool) -> dict:
