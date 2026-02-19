@@ -32,6 +32,28 @@
     - **Pipeline:** Implemented `digital_data_etl` in ZenML to orchestrate user creation and crawling.
     - **Hardening:** Added **Exponential Backoff** (retry logic) and Deduplication checks.
 
+### 🔄 Week 3: RAG Feature Pipeline (In Progress — Day 2/7)
+**Objective:** Build the clean → chunk → embed → Qdrant vector store pipeline.
+- **Architecture:** `Strategy + Dispatcher` pattern across 3 processing stages.
+- **Achievements (Days 1-2):**
+    - **Qdrant Infrastructure:** Singleton `QdrantDatabaseConnector` with local Docker + Cloud support.
+    - **Vector ODM:** `VectorBaseDocument` base class with `bulk_insert`, `search`, auto-collection creation (COSINE, 384-dim).
+    - **Domain Models:** 9 new models across 3 layers:
+        - **Cleaned:** `CleanedPostDocument`, `CleanedArticleDocument`, `CleanedRepositoryDocument` (no vectors)
+        - **Chunks:** `PostChunk`, `ArticleChunk`, `RepositoryChunk` (intermediate, deterministic UUIDs)
+        - **Embedded:** `EmbeddedPostChunk`, `EmbeddedArticleChunk`, `EmbeddedRepositoryChunk` (384-dim COSINE vectors)
+    - **Embedding Model:** `EmbeddingModelSingleton` wrapping `sentence-transformers/all-MiniLM-L6-v2` (384-dim, 256 max tokens).
+    - **Preprocessing Pipeline:**
+        - **Cleaning:** Regex-based text normalization per document type.
+        - **Chunking:** Type-specific strategies — Posts (250 tok/25 overlap), Articles (1000-2000 chars sentence-aware), Repos (1500 tok/100 overlap).
+        - **Embedding:** Batch encoding via SentenceTransformers with model metadata capture.
+    - **Design Patterns Applied:**
+        - **Strategy Pattern:** Abstract handlers per processing stage (clean/chunk/embed).
+        - **Factory Pattern:** `CleaningHandlerFactory`, `ChunkingHandlerFactory`, `EmbeddingHandlerFactory`.
+        - **Dispatcher Pattern:** `CleaningDispatcher`, `ChunkingDispatcher`, `EmbeddingDispatcher` route by `DataCategory`.
+        - **Singleton Pattern:** Thread-safe `SingletonMeta` for embedding/cross-encoder models.
+- **Remaining (Days 3-7):** ZenML pipeline steps + CLI, end-to-end run, Qdrant verification, CDC sync, lint + docs.
+
 ### 📊 Visual Architecture
 
 **1. High-Level System Architecture**
@@ -47,6 +69,12 @@ graph LR
         Worker[Crawlers]
     end
 
+    subgraph "Feature Pipeline (Week 3)"
+        Clean[Clean]
+        Chunk[Chunk]
+        Embed[Embed]
+    end
+
     subgraph "Data Warehouse"
         Mongo[(MongoDB - NoSQL)]
         Qdrant[(Qdrant - Vectors)]
@@ -56,7 +84,10 @@ graph LR
     MD --> Dispatcher
     Dispatcher --> Worker
     Worker --> Mongo
-    Mongo -.-> |Week 3| Qdrant
+    Mongo --> Clean
+    Clean --> Chunk
+    Chunk --> Embed
+    Embed --> Qdrant
 ```
 
 **2. ETL Pipeline Execution Flow**
@@ -81,6 +112,21 @@ sequenceDiagram
         Step2->>DB: Save Article (deduplicated)
     end
     Step2-->>ZenML: Success Signal
+```
+
+**3. Feature Pipeline Processing Flow (Week 3)**
+```mermaid
+graph TD
+    Raw[Raw Documents in MongoDB] --> QW[query_data_warehouse]
+    QW --> CD[clean_documents]
+    CD --> |CleaningDispatcher| Cleaned[CleanedDocument]
+    Cleaned --> CV[load_to_vector_db]
+    CV --> QC[(Qdrant: cleaned_* collections)]
+    Cleaned --> CE[chunk_and_embed]
+    CE --> |ChunkingDispatcher| Chunks[Chunks]
+    Chunks --> |EmbeddingDispatcher| Embedded[EmbeddedChunks]
+    Embedded --> EV[load_to_vector_db]
+    EV --> QE[(Qdrant: embedded_* collections)]
 ```
 
 ---
