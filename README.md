@@ -1,62 +1,14 @@
-# MoodSwarm: LLM Twin & MLOps Platform
+# 🧠 MoodSwarm: LLM Twin & MLOps Platform
 
-> **Goal:** Build an end-to-end LLM system that mimics a specific persona's writing style using the FTI (Feature, Training, Inference) architecture.
+> **The Goal:** Build an end-to-end AI system that learns to mimic a specific persona's writing style and knowledge base using the **FTI (Feature, Training, Inference) Architecture**.
 
 ---
 
-## 📅 Project Progress Log
+## 🏗️ System Architecture
 
-### ✅ Week 1: Infrastructure Foundation
-**Objective:** Set up a scalable, reproducible MLOps environment.
-- **Tech Stack:** Python 3.11, Poetry, Docker, ZenML.
-- **Achievements:**
-    - Established **Domain-Driven Design (DDD)** folder structure (`domain/`, `application/`, `infrastructure/`).
-    - Configured **Docker Compose** for persistence layer (MongoDB + Qdrant).
-    - Initialized **ZenML** as the orchestration engine.
-    - Implemented **Pydantic Settings** management for type-safe configuration.
-    - Created a **Smoke Test Pipeline** to verify database connectivity automatically.
+### High-Level Data Flow
+This diagram illustrates how data travels from the internet into our Vector Store.
 
-### ✅ Week 2: Digital Data ETL Pipeline
-**Objective:** Build the ingestion engine to scrape and normalize unstructured data.
-- **Architecture:** `Dispatcher` -> `Worker` pattern.
-- **Achievements:**
-    - **Domain Modeling:** Designed MongoDB ODM models (`User`, `Article`, `Repository`) with strict validation.
-    - **Crawlers:** Built modular scrapers for:
-        - **GitHub** (Clones repos, extracts code).
-        - **Medium** (Selenium headless browser).
-        - **Custom/Substack** (LangChain HTML parsing).
-    - **Design Patterns Applied:**
-        - **Strategy Pattern:** `BaseCrawler` interface for extensible workers.
-        - **Factory Pattern:** `CrawlerDispatcher` for dynamic worker selection.
-        - **Singleton Pattern:** `MongoDatabaseConnector` for efficient connection pooling.
-    - **Pipeline:** Implemented `digital_data_etl` in ZenML to orchestrate user creation and crawling.
-    - **Hardening:** Added **Exponential Backoff** (retry logic) and Deduplication checks.
-
-### 🔄 Week 3: RAG Feature Pipeline (In Progress — Day 2/7)
-**Objective:** Build the clean → chunk → embed → Qdrant vector store pipeline.
-- **Architecture:** `Strategy + Dispatcher` pattern across 3 processing stages.
-- **Achievements (Days 1-2):**
-    - **Qdrant Infrastructure:** Singleton `QdrantDatabaseConnector` with local Docker + Cloud support.
-    - **Vector ODM:** `VectorBaseDocument` base class with `bulk_insert`, `search`, auto-collection creation (COSINE, 384-dim).
-    - **Domain Models:** 9 new models across 3 layers:
-        - **Cleaned:** `CleanedPostDocument`, `CleanedArticleDocument`, `CleanedRepositoryDocument` (no vectors)
-        - **Chunks:** `PostChunk`, `ArticleChunk`, `RepositoryChunk` (intermediate, deterministic UUIDs)
-        - **Embedded:** `EmbeddedPostChunk`, `EmbeddedArticleChunk`, `EmbeddedRepositoryChunk` (384-dim COSINE vectors)
-    - **Embedding Model:** `EmbeddingModelSingleton` wrapping `sentence-transformers/all-MiniLM-L6-v2` (384-dim, 256 max tokens).
-    - **Preprocessing Pipeline:**
-        - **Cleaning:** Regex-based text normalization per document type.
-        - **Chunking:** Type-specific strategies — Posts (250 tok/25 overlap), Articles (1000-2000 chars sentence-aware), Repos (1500 tok/100 overlap).
-        - **Embedding:** Batch encoding via SentenceTransformers with model metadata capture.
-    - **Design Patterns Applied:**
-        - **Strategy Pattern:** Abstract handlers per processing stage (clean/chunk/embed).
-        - **Factory Pattern:** `CleaningHandlerFactory`, `ChunkingHandlerFactory`, `EmbeddingHandlerFactory`.
-        - **Dispatcher Pattern:** `CleaningDispatcher`, `ChunkingDispatcher`, `EmbeddingDispatcher` route by `DataCategory`.
-        - **Singleton Pattern:** Thread-safe `SingletonMeta` for embedding/cross-encoder models.
-- **Remaining (Days 3-7):** ZenML pipeline steps + CLI, end-to-end run, Qdrant verification, CDC sync, lint + docs.
-
-### 📊 Visual Architecture
-
-**1. High-Level System Architecture**
 ```mermaid
 graph LR
     subgraph Sources
@@ -68,7 +20,7 @@ graph LR
         Dispatcher[Crawler Dispatcher]
         Worker[Crawlers]
     end
-
+    
     subgraph "Feature Pipeline (Week 3)"
         Clean[Clean]
         Chunk[Chunk]
@@ -90,7 +42,64 @@ graph LR
     Embed --> Qdrant
 ```
 
-**2. ETL Pipeline Execution Flow**
+![MoodSwarm Architecture](/Users/arkaj/.gemini/antigravity/brain/51d62764-33cd-49d8-a1a9-fcdb7928381f/moodswarm_architecture_v1_1771441640083.png)
+
+### Tech Stack & Design Decisions
+| Component | Technology | Why? |
+|-----------|------------|------|
+| **Orchestrator** | **ZenML** | Decouples code from infra; reproducible pipeline runs. |
+| **Database** | **MongoDB** | Schemaless storage for raw unstructured data (blogs, code). |
+| **Vector DB** | **Qdrant** | High-performance vector search for RAG. |
+| **Language** | **Python 3.11** | Modern AI standard with **Poetry** for dependency management. |
+| **Design** | **DDD** | Domain-Driven Design for modular, maintainable code. |
+
+---
+
+## 📅 Engineering Journal (Progress Log)
+
+### 🔄 Week 3: RAG Feature Pipeline (In Progress)
+**Objective:** Build the clean → chunk → embed → Qdrant vector store pipeline.
+- **Architecture Strategy:** `Strategy + Dispatcher` pattern across 3 processing stages.
+- **Achievements (Days 1-2):**
+    - **Qdrant Infrastructure:** Singleton `QdrantDatabaseConnector` with local Docker + Cloud support.
+    - **Vector ODM Layer:** `VectorBaseDocument` base class with `bulk_insert`, `search`, auto-collection creation (COSINE, 384-dim).
+    - **Domain Models:** 9 new models across 3 layers:
+        - **Cleaned:** `CleanedPostDocument`, `CleanedArticleDocument`, `CleanedRepositoryDocument` (no vectors)
+        - **Chunks:** `PostChunk`, `ArticleChunk`, `RepositoryChunk` (intermediate, deterministic UUIDs)
+        - **Embedded:** `EmbeddedPostChunk`, `EmbeddedArticleChunk`, `EmbeddedRepositoryChunk` (384-dim COSINE vectors)
+    - **Embedding Model:** `EmbeddingModelSingleton` wrapping `sentence-transformers/all-MiniLM-L6-v2` (384-dim, 256 max tokens).
+    - **Preprocessing Pipeline:**
+        - **Cleaning:** Regex-based text normalization per document type.
+        - **Chunking:** Type-specific strategies — Posts (250 tok/25 overlap), Articles (1000-2000 chars sentence-aware), Repos (1500 tok/100 overlap).
+        - **Embedding:** Batch encoding via SentenceTransformers with model metadata capture.
+    - **Design Patterns Applied:**
+        - **Strategy Pattern:** Abstract handlers per processing stage (clean/chunk/embed).
+        - **Factory Pattern:** `CleaningHandlerFactory`, `ChunkingHandlerFactory`, `EmbeddingHandlerFactory`.
+        - **Dispatcher Pattern:** `CleaningDispatcher`, `ChunkingDispatcher`, `EmbeddingDispatcher` route by `DataCategory`.
+        - **Singleton Pattern:** Thread-safe `SingletonMeta` for embedding models.
+- **Remaining (Days 3-7):** ZenML pipeline steps + CLI, end-to-end run, Qdrant verification, CDC sync, lint + docs.
+
+### ✅ Week 2: Digital Data ETL Pipeline
+**Objective:** Ingestion engine to scrape the internet.
+- **Architecture Pattern:** `Dispatcher` -> `Worker` Strategy.
+- **Achievements:**
+    - **Crawlers:** Custom scrapers for GitHub (Code), Medium (Selenium), and generic sites.
+    - **Resilience:** Exponential backoff retry logic + Deduplication checks.
+    - **Data Modeling:** Strict MongoDB schemas (`User`, `Article`, `Repository`).
+
+### ✅ Week 1: Infrastructure Foundation
+**Objective:** Scalable, reproducible MLOps environment.
+- **Achievements:**
+    - Docker Compose for persistence (Mongo + Qdrant).
+    - ZenML orchestration setup.
+    - Pydantic Settings for type-safe config.
+
+---
+
+## 🔍 Deep Dive: Pipeline Logic
+
+### ETL Pipeline (Extraction)
+How we get data *into* the system.
 ```mermaid
 sequenceDiagram
     participant CLI as tools.run
@@ -103,7 +112,6 @@ sequenceDiagram
     ZenML->>Step1: Execute (Paul Iusztin)
     Step1->>DB: Check User Exists?
     DB-->>Step1: Return User ID
-    Step1->>ZenML: Return User Object
     
     ZenML->>Step2: Execute (User, Links)
     loop For each URL
@@ -111,10 +119,11 @@ sequenceDiagram
         Step2->>Step2: Download & Clean Data
         Step2->>DB: Save Article (deduplicated)
     end
-    Step2-->>ZenML: Success Signal
+    Step2-->>ZenML: Success
 ```
 
-**3. Feature Pipeline Processing Flow (Week 3)**
+### Feature Pipeline (Transformation)
+How we turn text into vectors.
 ```mermaid
 graph TD
     Raw[Raw Documents in MongoDB] --> QW[query_data_warehouse]
@@ -138,13 +147,16 @@ graph TD
 docker-compose up -d
 ```
 
-### 2. Run the ETL Pipeline
+### 2. Run Pipelines
 ```bash
+# Ingest Data (Week 2)
 poetry run python -m tools.run --run-etl
+
+# Validate Infrastructure (Week 1)
+poetry run python -m tools.run --run-smoke-test
 ```
 
-### 3. Verification
-Check the ZenML dashboard:
+### 3. Monitoring
 ```bash
 poetry run zenml login --local
 ```
