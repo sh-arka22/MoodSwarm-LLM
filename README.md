@@ -42,7 +42,7 @@ graph LR
     Embed --> Qdrant
 ```
 
-![MoodSwarm Architecture](/Users/arkaj/.gemini/antigravity/brain/51d62764-33cd-49d8-a1a9-fcdb7928381f/moodswarm_architecture_v1_1771441640083.png)
+![MoodSwarm Architecture](moodswarm.png)
 
 ### Tech Stack & Design Decisions
 | Component | Technology | Why? |
