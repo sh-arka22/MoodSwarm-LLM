@@ -43,4 +43,14 @@ def chunk_article(text: str, min_length: int, max_length: int) -> list[str]:
     if len(current_chunk) >= min_length:
         extracts.append(current_chunk.strip())
 
-    return extracts
+    # Second stage: cap each sentence-aware chunk at embedding model's max tokens
+    token_splitter = SentenceTransformersTokenTextSplitter(
+        chunk_overlap=50,
+        tokens_per_chunk=embedding_model.max_input_length,
+        model_name=embedding_model.model_id,
+    )
+    capped_extracts = []
+    for extract in extracts:
+        capped_extracts.extend(token_splitter.split_text(extract))
+
+    return capped_extracts
