@@ -148,15 +148,15 @@ class VectorBaseDocument(BaseModel, Generic[T], ABC):
     @classmethod
     def _search(cls: Type[T], query_vector: list, limit: int = 10, **kwargs) -> list[T]:
         collection_name = cls.get_collection_name()
-        records = connection.search(
+        response = connection.query_points(
             collection_name=collection_name,
-            query_vector=query_vector,
+            query=query_vector,
             limit=limit,
             with_payload=kwargs.pop("with_payload", True),
             with_vectors=kwargs.pop("with_vectors", False),
             **kwargs,
         )
-        documents = [cls.from_record(record) for record in records]
+        documents = [cls.from_record(point) for point in response.points]
 
         return documents
 
