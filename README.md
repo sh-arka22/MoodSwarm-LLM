@@ -1,141 +1,208 @@
 # 🧠 MoodSwarm: LLM Twin & MLOps Platform
 
-> **The Goal:** Build an end-to-end AI system that learns to mimic a specific persona's writing style and knowledge base using the **FTI (Feature, Training, Inference) Architecture**.
+> Build an end-to-end AI system that mimics a specific persona's writing style and knowledge using the **FTI (Feature, Training, Inference) Architecture**.
+
+![MoodSwarm Architecture](moodswarm.png)
 
 ---
 
 ## 🏗️ System Architecture
 
-### High-Level Data Flow
-This diagram illustrates how data travels from the internet into our Vector Store.
-
+### End-to-End Data Flow
 ```mermaid
 graph LR
-    subgraph Sources
-        GH[GitHub]
-        MD[Medium/Substack]
+    subgraph "Data Sources"
+        GH["GitHub Repos"]
+        MD["Medium Articles"]
+        SS["Substack / Custom"]
     end
 
     subgraph "ETL Pipeline (Week 2)"
-        Dispatcher[Crawler Dispatcher]
-        Worker[Crawlers]
+        D[CrawlerDispatcher]
+        GC[GithubCrawler]
+        MC[MediumCrawler]
+        CC[CustomArticleCrawler]
     end
-    
+
     subgraph "Feature Pipeline (Week 3)"
-        Clean[Clean]
-        Chunk[Chunk]
-        Embed[Embed]
+        Clean["CleaningDispatcher"]
+        Chunk["ChunkingDispatcher"]
+        Embed["EmbeddingDispatcher"]
     end
 
-    subgraph "Data Warehouse"
-        Mongo[(MongoDB - NoSQL)]
-        Qdrant[(Qdrant - Vectors)]
+    subgraph "Storage Layer"
+        Mongo[(MongoDB)]
+        Qdrant[(Qdrant)]
     end
 
-    GH --> Dispatcher
-    MD --> Dispatcher
-    Dispatcher --> Worker
-    Worker --> Mongo
-    Mongo --> Clean
-    Clean --> Chunk
-    Chunk --> Embed
-    Embed --> Qdrant
+    GH --> D
+    MD --> D
+    SS --> D
+    D --> GC --> Mongo
+    D --> MC --> Mongo
+    D --> CC --> Mongo
+    Mongo --> Clean --> Chunk --> Embed --> Qdrant
 ```
 
-![MoodSwarm Architecture](moodswarm.png)
-
-### Tech Stack & Design Decisions
-| Component | Technology | Why? |
-|-----------|------------|------|
-| **Orchestrator** | **ZenML** | Decouples code from infra; reproducible pipeline runs. |
-| **Database** | **MongoDB** | Schemaless storage for raw unstructured data (blogs, code). |
-| **Vector DB** | **Qdrant** | High-performance vector search for RAG. |
-| **Language** | **Python 3.11** | Modern AI standard with **Poetry** for dependency management. |
-| **Design** | **DDD** | Domain-Driven Design for modular, maintainable code. |
+### Tech Stack
+| Layer | Technology | Purpose |
+|-------|------------|---------|
+| Orchestration | **ZenML** | Pipeline DAGs, caching, artifact versioning |
+| Raw Storage | **MongoDB** | Schemaless document store for crawled data |
+| Vector Storage | **Qdrant** | ANN search with HNSW indexing (384-dim COSINE) |
+| Embeddings | **all-MiniLM-L6-v2** | Sentence-level encoding (384 dimensions) |
+| Language | **Python 3.11 + Poetry** | Reproducible dependency management |
+| Containers | **Docker Compose** | Local MongoDB + Qdrant infrastructure |
+| Architecture | **DDD** | Domain-Driven Design with layered separation |
 
 ---
 
-## 📅 Engineering Journal (Progress Log)
+## 📂 Project Structure
 
-### 🔄 Week 3: RAG Feature Pipeline (In Progress)
-**Objective:** Build the clean → chunk → embed → Qdrant vector store pipeline.
-- **Architecture Strategy:** `Strategy + Dispatcher` pattern across 3 processing stages.
-- **Achievements (Days 1-2):**
-    - **Qdrant Infrastructure:** Singleton `QdrantDatabaseConnector` with local Docker + Cloud support.
-    - **Vector ODM Layer:** `VectorBaseDocument` base class with `bulk_insert`, `search`, auto-collection creation (COSINE, 384-dim).
-    - **Domain Models:** 9 new models across 3 layers:
-        - **Cleaned:** `CleanedPostDocument`, `CleanedArticleDocument`, `CleanedRepositoryDocument` (no vectors)
-        - **Chunks:** `PostChunk`, `ArticleChunk`, `RepositoryChunk` (intermediate, deterministic UUIDs)
-        - **Embedded:** `EmbeddedPostChunk`, `EmbeddedArticleChunk`, `EmbeddedRepositoryChunk` (384-dim COSINE vectors)
-    - **Embedding Model:** `EmbeddingModelSingleton` wrapping `sentence-transformers/all-MiniLM-L6-v2` (384-dim, 256 max tokens).
-    - **Preprocessing Pipeline:**
-        - **Cleaning:** Regex-based text normalization per document type.
-        - **Chunking:** Type-specific strategies — Posts (250 tok/25 overlap), Articles (1000-2000 chars sentence-aware), Repos (1500 tok/100 overlap).
-        - **Embedding:** Batch encoding via SentenceTransformers with model metadata capture.
-    - **Design Patterns Applied:**
-        - **Strategy Pattern:** Abstract handlers per processing stage (clean/chunk/embed).
-        - **Factory Pattern:** `CleaningHandlerFactory`, `ChunkingHandlerFactory`, `EmbeddingHandlerFactory`.
-        - **Dispatcher Pattern:** `CleaningDispatcher`, `ChunkingDispatcher`, `EmbeddingDispatcher` route by `DataCategory`.
-        - **Singleton Pattern:** Thread-safe `SingletonMeta` for embedding models.
-- **Remaining (Days 3-7):** ZenML pipeline steps + CLI, end-to-end run, Qdrant verification, CDC sync, lint + docs.
+```
+moodSwarm/
+├── llm_engineering/                    # Core DDD Package
+│   ├── domain/                         # Data Models (Pure Python, no external deps)
+│   │   ├── base/
+│   │   │   ├── nosql.py                #   MongoDB ODM (CRUD, UUID handling)
+│   │   │   └── vector.py              #   Qdrant ODM (bulk_insert, search, auto-collection)
+│   │   ├── documents.py               #   UserDocument, ArticleDocument, RepositoryDocument, PostDocument
+│   │   ├── cleaned_documents.py       #   CleanedArticleDocument, CleanedPostDocument, CleanedRepositoryDocument
+│   │   ├── chunks.py                  #   ArticleChunk, PostChunk, RepositoryChunk
+│   │   ├── embedded_chunks.py         #   EmbeddedArticleChunk, EmbeddedPostChunk, EmbeddedRepositoryChunk
+│   │   ├── types.py                   #   DataCategory enum (posts, articles, repositories, prompts, datasets...)
+│   │   └── exceptions.py             #   LLMTwinException, ImproperlyConfigured
+│   │
+│   ├── application/                    # Business Logic
+│   │   ├── crawlers/                  #   GithubCrawler, MediumCrawler, CustomArticleCrawler, CrawlerDispatcher
+│   │   ├── preprocessing/             #   Cleaning / Chunking / Embedding handlers + dispatchers + factories
+│   │   │   ├── dispatchers.py         #     CleaningDispatcher, ChunkingDispatcher, EmbeddingDispatcher
+│   │   │   ├── cleaning_data_handlers.py
+│   │   │   ├── chunking_data_handlers.py
+│   │   │   ├── embedding_data_handlers.py
+│   │   │   └── operations/            #     Low-level chunking + cleaning regex operations
+│   │   ├── networks/                  #   EmbeddingModelSingleton, CrossEncoderModelSingleton
+│   │   └── utils/                     #   split_user_full_name, batch()
+│   │
+│   ├── infrastructure/                 # External System Adapters
+│   │   └── db/
+│   │       ├── mongo.py               #   MongoDatabaseConnector (Singleton)
+│   │       └── qdrant.py              #   QdrantDatabaseConnector (Singleton)
+│   │
+│   ├── model/                          # ML Model Code (future: SFT, DPO)
+│   └── settings.py                     # Pydantic Settings (.env loader)
+│
+├── pipelines/                          # ZenML Pipeline Definitions
+│   ├── smoke_test.py                  #   Verify MongoDB + Qdrant connectivity
+│   ├── digital_data_etl.py            #   get_or_create_user → crawl_links
+│   └── feature_engineering.py         #   query_data_warehouse → clean → chunk_and_embed → load_to_vector_db
+│
+├── steps/                              # ZenML Step Implementations
+│   ├── etl/
+│   │   ├── get_or_create_user.py      #   User lookup/creation + metadata logging
+│   │   └── crawl_links.py             #   Dispatcher-based crawling with retry + backoff
+│   └── feature_engineering/
+│       ├── query_data_warehouse.py    #   Concurrent MongoDB fetch (ThreadPoolExecutor)
+│       ├── clean.py                   #   CleaningDispatcher per document
+│       ├── rag.py                     #   ChunkingDispatcher → EmbeddingDispatcher (batch=10)
+│       └── load_to_vector_db.py       #   group_by_class → bulk_insert to Qdrant
+│
+├── configs/                            # Pipeline Parameter Files
+│   ├── digital_data_etl.yaml          #   User name + list of URLs to crawl
+│   └── feature_engineering.yaml       #   Author names for feature extraction
+│
+├── tools/                              # CLI Utilities
+│   ├── run.py                         #   Main CLI (--run-smoke-test | --run-etl | --run-feature-engineering)
+│   ├── data_warehouse.py              #   MongoDB export/import (JSON backup/restore)
+│   └── qdrant_inspect.py             #   Qdrant CLI (list-collections, stats, sample, semantic search)
+│
+├── interview/
+│   └── INTERVIEW_QUESTIONS.md         #   40 interview Q&A derived from this codebase
+│
+├── data/data_warehouse_raw_data/       #   Pre-crawled JSON data for offline import
+├── docker-compose.yml                  #   MongoDB + Qdrant containers
+└── pyproject.toml                      #   Poetry config + Poe tasks
+```
+
+---
+
+## 📅 Engineering Journal
+
+### 🔄 Week 3: RAG Feature Pipeline *(In Progress)*
+**Objective:** Transform raw text → searchable vectors in Qdrant.
+
+- **Pipeline:** `feature_engineering` with 4 ZenML steps:
+  1. `query_data_warehouse` — concurrent MongoDB fetch via `ThreadPoolExecutor`
+  2. `clean_documents` — regex normalization per data category
+  3. `chunk_and_embed` — type-specific splitting + SentenceTransformer encoding
+  4. `load_to_vector_db` — batched upsert into Qdrant (called twice: cleaned + embedded)
+- **Domain Models:** 9 new classes across 3 transformation layers:
+  - **Cleaned:** `CleanedPostDocument`, `CleanedArticleDocument`, `CleanedRepositoryDocument`
+  - **Chunks:** `PostChunk`, `ArticleChunk`, `RepositoryChunk` (deterministic UUIDs)
+  - **Embedded:** `EmbeddedPostChunk`, `EmbeddedArticleChunk`, `EmbeddedRepositoryChunk` (384-dim vectors)
+- **Chunking Strategies:**
+  - Posts: 250 tokens / 25 overlap
+  - Articles: 1000–2000 chars, sentence-aware
+  - Repositories: 1500 tokens / 100 overlap
+- **Tooling:** Built `tools/qdrant_inspect.py` CLI for listing collections, sampling points, and running semantic searches
+- **Design Patterns:** Strategy (handlers), Factory (handler factories), Dispatcher (category routing), Singleton (embedding model)
 
 ### ✅ Week 2: Digital Data ETL Pipeline
-**Objective:** Ingestion engine to scrape the internet.
-- **Architecture Pattern:** `Dispatcher` -> `Worker` Strategy.
-- **Achievements:**
-    - **Crawlers:** Custom scrapers for GitHub (Code), Medium (Selenium), and generic sites.
-    - **Resilience:** Exponential backoff retry logic + Deduplication checks.
-    - **Data Modeling:** Strict MongoDB schemas (`User`, `Article`, `Repository`).
+**Objective:** Automated data ingestion from the internet.
+
+- **Pipeline:** `digital_data_etl` — `get_or_create_user` → `crawl_links`
+- **Crawlers:** GitHub (git clone + file walk), Medium (Selenium), Custom (LangChain)
+- **Routing:** `CrawlerDispatcher` with regex-based URL matching + fallback
+- **Resilience:** Exponential backoff retries (tenacity), deduplication via `.find(link=link)`
+- **Tooling:** `tools/data_warehouse.py` for MongoDB JSON backup/restore
 
 ### ✅ Week 1: Infrastructure Foundation
-**Objective:** Scalable, reproducible MLOps environment.
-- **Achievements:**
-    - Docker Compose for persistence (Mongo + Qdrant).
-    - ZenML orchestration setup.
-    - Pydantic Settings for type-safe config.
+**Objective:** Reproducible MLOps environment.
+
+- Docker Compose for MongoDB (27017) + Qdrant (6333)
+- ZenML local stack initialization
+- Pydantic Settings for `.env`-based configuration
+- Smoke test pipeline for connectivity validation
 
 ---
 
-## 🔍 Deep Dive: Pipeline Logic
+## 🔍 Pipeline Deep Dives
 
-### ETL Pipeline (Extraction)
-How we get data *into* the system.
+### ETL Pipeline Sequence
 ```mermaid
 sequenceDiagram
-    participant CLI as tools.run
-    participant ZenML as ZenML Pipeline
-    participant Step1 as get_or_create_user
-    participant Step2 as crawl_links
+    participant CLI as tools/run.py
+    participant ZML as ZenML
+    participant S1 as get_or_create_user
+    participant S2 as crawl_links
     participant DB as MongoDB
 
-    CLI->>ZenML: Trigger --run-etl
-    ZenML->>Step1: Execute (Paul Iusztin)
-    Step1->>DB: Check User Exists?
-    DB-->>Step1: Return User ID
-    
-    ZenML->>Step2: Execute (User, Links)
-    loop For each URL
-        Step2->>Step2: Dispatcher finds Crawler
-        Step2->>Step2: Download & Clean Data
-        Step2->>DB: Save Article (deduplicated)
+    CLI->>ZML: --run-etl
+    ZML->>S1: Execute("Paul Iusztin")
+    S1->>DB: UserDocument.get_or_create()
+    DB-->>S1: UserDocument(id=uuid)
+    ZML->>S2: Execute(user, [url1, url2, url3])
+    loop Each URL
+        S2->>S2: CrawlerDispatcher → select crawler
+        S2->>S2: crawler.extract() with retry
+        S2->>DB: ArticleDocument.save() (deduplicated)
     end
-    Step2-->>ZenML: Success
+    S2-->>ZML: ✅ 3/3 crawled
 ```
 
-### Feature Pipeline (Transformation)
-How we turn text into vectors.
+### Feature Engineering Pipeline
 ```mermaid
 graph TD
-    Raw[Raw Documents in MongoDB] --> QW[query_data_warehouse]
-    QW --> CD[clean_documents]
-    CD --> |CleaningDispatcher| Cleaned[CleanedDocument]
-    Cleaned --> CV[load_to_vector_db]
-    CV --> QC[(Qdrant: cleaned_* collections)]
-    Cleaned --> CE[chunk_and_embed]
-    CE --> |ChunkingDispatcher| Chunks[Chunks]
-    Chunks --> |EmbeddingDispatcher| Embedded[EmbeddedChunks]
-    Embedded --> EV[load_to_vector_db]
-    EV --> QE[(Qdrant: embedded_* collections)]
+    A[MongoDB Raw Documents] --> B[query_data_warehouse]
+    B --> |ThreadPoolExecutor| C[clean_documents]
+    C --> |CleaningDispatcher| D["CleanedDocuments"]
+    D --> E1[load_to_vector_db]
+    E1 --> F1["Qdrant: cleaned_* collections"]
+    D --> G[chunk_and_embed]
+    G --> |ChunkingDispatcher| H[Chunks]
+    H --> |"EmbeddingDispatcher (batch=10)"| I["EmbeddedChunks (384-dim)"]
+    I --> E2[load_to_vector_db]
+    E2 --> F2["Qdrant: embedded_* collections"]
 ```
 
 ---
@@ -149,14 +216,54 @@ docker-compose up -d
 
 ### 2. Run Pipelines
 ```bash
-# Ingest Data (Week 2)
-poetry run python -m tools.run --run-etl
-
-# Validate Infrastructure (Week 1)
+# Connectivity check
 poetry run python -m tools.run --run-smoke-test
+
+# Crawl data from the internet → MongoDB
+poetry run python -m tools.run --run-etl --no-cache
+
+# Clean → Chunk → Embed → Qdrant
+poetry run python -m tools.run --run-feature-engineering --no-cache
 ```
 
-### 3. Monitoring
+### 3. Inspect Vector Store
+```bash
+# List all Qdrant collections
+poetry run python tools/qdrant_inspect.py list-collections
+
+# View sample points
+poetry run python tools/qdrant_inspect.py sample embedded_articles --limit 3
+
+# Semantic search
+poetry run python tools/qdrant_inspect.py search embedded_articles --query "machine learning deployment"
+```
+
+### 4. Data Backup/Restore
+```bash
+# Export MongoDB → JSON
+poetry run python tools/data_warehouse.py --export-raw-data
+
+# Import JSON → MongoDB
+poetry run python tools/data_warehouse.py --import-raw-data
+```
+
+### 5. Monitoring
 ```bash
 poetry run zenml login --local
 ```
+
+---
+
+## 🎓 Interview Preparation
+
+A comprehensive set of **40 interview questions** derived directly from this codebase is available at [`interview/INTERVIEW_QUESTIONS.md`](interview/INTERVIEW_QUESTIONS.md). Topics covered:
+- System Architecture & FTI Design
+- Data Engineering & ETL Patterns
+- Feature Pipeline (Clean → Chunk → Embed)
+- Domain Modeling & ODM Patterns
+- Embeddings & NLP Theory
+- Vector Databases & Similarity Search
+- Software Design Patterns (Strategy, Factory, Dispatcher, Singleton)
+- MLOps & Pipeline Orchestration
+- Model Training (QLoRA, SFT, DPO)
+- Mathematical Foundations
