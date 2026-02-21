@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MoodSwarm — Data Save Flow</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    padding: 32px 24px;
+    min-height: 100vh;
+  }
+  h1 {
+    text-align: center;
+    font-size: 22px;
+    font-weight: 700;
+    color: #58a6ff;
+    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 13px;
+    color: #8b949e;
+    margin-bottom: 36px;
+  }
+
+  /* ── SECTION LABELS ── */
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #8b949e;
+    margin-bottom: 10px;
+    padding-left: 4px;
+  }
+
+  /* ── FLOW CONTAINER ── */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    max-width: 860px;
+    margin: 0 auto;
+  }
+
+  /* ── STAGE BLOCK ── */
+  .stage {
+    width: 100%;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 18px 22px;
+    position: relative;
+  }
+  .stage-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .stage-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .stage-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #e6edf3;
+  }
+  .stage-sub {
+    font-size: 11px;
+    color: #8b949e;
+    margin-top: 2px;
+  }
+
+  /* ── CODE BOX ── */
+  .code-box {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    padding: 12px 14px;
+    font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    overflow-x: auto;
+  }
+  .code-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    color: #8b949e;
+  }
+  .k { color: #ff7b72; }
+  .s { color: #a5d6ff; }
+  .v { color: #79c0ff; }
+  .c { color: #8b949e; }
+  .n { color: #ffa657; }
+  .m { color: #d2a8ff; }
+  .g { color: #56d364; }
+  .y { color: #e3b341; }
+
+  /* ── TRANSFORM ARROW ── */
+  .transform-row {
+    display: flex;
+    align-items: stretch;
+    width: 100%;
+    gap: 0;
+    margin: 6px 0;
+  }
+  .transform-line {
+    width: 2px;
+    background: linear-gradient(to bottom, #30363d, #58a6ff55, #30363d);
+    margin: 0 auto;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .transform-badge {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    background: #1c2128;
+    border: 1px solid #388bfd44;
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 10px;
+    font-weight: 600;
+    color: #58a6ff;
+    white-space: nowrap;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── ARROW CONNECTOR ── */
+  .arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    width: 100%;
+    padding: 4px 0;
+  }
+  .arrow-line {
+    width: 2px;
+    height: 28px;
+    background: linear-gradient(to bottom, #30363d, #58a6ff88);
+  }
+  .arrow-head {
+    width: 0;
+    height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 9px solid #58a6ff88;
+  }
+  .method-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: #d2a8ff;
+    background: #1c2128;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 2px 8px;
+    margin: -4px 0;
+    letter-spacing: 0.3px;
+  }
+
+  /* ── SIDE BY SIDE ── */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 40px 1fr;
+    gap: 0;
+    width: 100%;
+    align-items: center;
+  }
+  .vs-arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    color: #58a6ff;
+    gap: 4px;
+  }
+  .vs-label {
+    font-size: 9px;
+    color: #8b949e;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+
+  /* ── COLORS BY TYPE ── */
+  .user-bg { background: #1c2128; border-color: #3d5a80; }
+  .user-icon { background: #1a3a5c; }
+  .user-title { color: #79c0ff; }
+
+  .crawler-bg { background: #1c2128; border-color: #2d6a4f; }
+  .crawler-icon { background: #1a3d2b; }
+  .crawler-title { color: #56d364; }
+
+  .python-bg { background: #1c2128; border-color: #4a3f6b; }
+  .python-icon { background: #2d2248; }
+  .python-title { color: #d2a8ff; }
+
+  .mongo-bg { background: #1c2128; border-color: #5a3e1b; }
+  .mongo-icon { background: #3d2910; }
+  .mongo-title { color: #ffa657; }
+
+  .check-bg { background: #1a2e1a; border-color: #2d6a2d; }
+
+  /* ── PILL TAGS ── */
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  .tag {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 20px;
+    border: 1px solid;
+    letter-spacing: 0.3px;
+  }
+  .tag-blue  { color: #58a6ff; border-color: #388bfd44; background: #0d1117; }
+  .tag-green { color: #56d364; border-color: #2ea04344; background: #0d1117; }
+  .tag-orange{ color: #ffa657; border-color: #e3621444; background: #0d1117; }
+  .tag-purple{ color: #d2a8ff; border-color: #8957e544; background: #0d1117; }
+
+  /* ── LEGEND ── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    justify-content: center;
+    margin-top: 32px;
+    padding: 16px;
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 10px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: #8b949e;
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── SPLIT GRID ── */
+  .format-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 10px;
+  }
+  .format-box {
+    background: #0d1117;
+    border: 1px solid #21262d;
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .format-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  @media (max-width: 600px) {
+    .format-compare { grid-template-columns: 1fr; }
+    .two-col { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>MoodSwarm — Complete Data Save Flow</h1>
+<p class="subtitle">From real-world URL → Python object → MongoDB document · With exact format transformations</p>
+
+<div class="flow">
+
+  <!-- STAGE 1: ENTRY POINT -->
+  <div class="stage crawler-bg">
+    <div class="stage-header">
+      <div class="stage-icon crawler-icon">🌐</div>
+      <div>
+        <div class="stage-title crawler-title">Stage 1 — Entry Point (ZenML Pipeline Step)</div>
+        <div class="stage-sub">tools/run.py  →  pipeline: digital_data_etl  →  step: get_or_create_user</div>
+      </div>
+    </div>
+
+    <div class="code-label">What gets called in your pipeline step:</div>
+    <div class="code-box">
+<span class="c"># Step 1 of the ZenML pipeline</span>
+<span class="v">user</span>, <span class="v">created</span> = <span class="v">UserDocument</span>.<span class="m">get_or_create</span>(
+&nbsp;&nbsp;<span class="y">first_name</span>=<span class="s">"Arkajyoti"</span>,
+&nbsp;&nbsp;<span class="y">last_name</span>=<span class="s">"Bose"</span>
+)
+<span class="c"># created == True if new, False if already exists</span>
+    </div>
+
+    <div class="tags">
+      <span class="tag tag-green">UserDocument extends NoSQLBaseDocument</span>
+      <span class="tag tag-blue">collection → "users"</span>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="method-label">get_or_create(**kwargs) called</div>
+    <div class="arrow-line"></div>
+    <div class="arrow-head"></div>
+  </div>
+
+  <!-- STAGE 2: LOOKUP CHECK -->
+  <div class="stage check-bg" style="border-color: #2d6a4f;">
+    <div class="stage-header">
+      <div class="stage-icon" style="background:#1a3d2b;">🔍</div>
+      <div>
+        <div class="stage-title" style="color:#56d364;">Stage 2 — Deduplication Check (cls.find)</div>
+        <div class="stage-sub">Queries MongoDB first. Prevents duplicate documents from re-crawls.</div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div>
+        <div class="code-label">🟢 Path A — Document found</div>
+        <div class="code-box">
+<span class="c"># find() queries Mongo</span>
+<span class="v">instance</span> = <span class="v">UserDocument</span>.<span class="m">find</span>(
+&nbsp;&nbsp;<span class="y">first_name</span>=<span class="s">"Arkajyoti"</span>
+)
+<span class="g"># Returns UserDocument object</span>
+<span class="k">return</span> <span class="v">instance</span>, <span class="k">False</span>
+<span class="c"># ↑ already_exists = False</span>
+        </div>
+      </div>
+
+      <div class="vs-arrow">
+        <div class="vs-label">OR</div>
+        <div style="font-size:24px;color:#30363d;">⇄</div>
+      </div>
+
+      <div>
+        <div class="code-label">🔴 Path B — Not found → CREATE</div>
+        <div class="code-box">
+<span class="c"># Nothing in Mongo →</span>
+<span class="v">new_doc</span> = <span class="v">UserDocument</span>(
+&nbsp;&nbsp;<span class="y">first_name</span>=<span class="s">"Arkajyoti"</span>,
+&nbsp;&nbsp;<span class="y">last_name</span>=<span class="s">"Bose"</span>
+)
+<span class="v">new_doc</span>.<span class="m">save</span>()
+<span class="k">return</span> <span class="v">new_doc</span>, <span class="k">True</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="method-label">new_doc = UserDocument(...) → Pydantic constructs object</div>
+    <div class="arrow-line"></div>
+    <div class="arrow-head"></div>
+  </div>
+
+  <!-- STAGE 3: PYTHON OBJECT -->
+  <div class="stage python-bg">
+    <div class="stage-header">
+      <div class="stage-icon python-icon">🐍</div>
+      <div>
+        <div class="stage-title python-title">Stage 3 — Python Object (In Memory)</div>
+        <div class="stage-sub">Pydantic model — validated, typed, UUID auto-assigned. Lives on your RAM.</div>
+      </div>
+    </div>
+
+    <div class="code-label">What the object looks like in Python memory:</div>
+    <div class="code-box">
+<span class="c"># UserDocument instance in RAM</span>
+<span class="v">new_doc</span> = <span class="v">UserDocument</span> {
+&nbsp;&nbsp;<span class="y">id</span>:         <span class="n">UUID('a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d')</span>,  <span class="c"># ← auto-generated UUID object</span>
+&nbsp;&nbsp;<span class="y">first_name</span>: <span class="s">"Arkajyoti"</span>,                               <span class="c"># ← str</span>
+&nbsp;&nbsp;<span class="y">last_name</span>:  <span class="s">"Bose"</span>                                      <span class="c"># ← str</span>
+}
+
+<span class="c"># Field types are PYTHON types — UUID, str, int, list[float], etc.</span>
+<span class="c"># MongoDB knows nothing about this yet.</span>
+    </div>
+
+    <div class="tags">
+      <span class="tag tag-purple">id field = Python UUID object</span>
+      <span class="tag tag-blue">Pydantic validates all fields on creation</span>
+      <span class="tag tag-green">default_factory=uuid4 fires here</span>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="method-label">new_doc.save() → to_mongo() called internally</div>
+    <div class="arrow-line"></div>
+    <div class="arrow-head"></div>
+  </div>
+
+  <!-- STAGE 4: FORMAT TRANSFORMATION -->
+  <div class="stage" style="border-color:#e3b34144; background:#1c1e10;">
+    <div class="stage-header">
+      <div class="stage-icon" style="background:#2d2810;">🔄</div>
+      <div>
+        <div class="stage-title" style="color:#e3b341;">Stage 4 — Format Transformation (to_mongo)</div>
+        <div class="stage-sub">The translator. Converts Python types → MongoDB-safe dict. This is the critical step.</div>
+      </div>
+    </div>
+
+    <div class="code-label">to_mongo() execution, line by line:</div>
+    <div class="code-box">
+<span class="k">def</span> <span class="m">to_mongo</span>(<span class="v">self</span>) → <span class="k">dict</span>:
+
+&nbsp;&nbsp;<span class="c"># Step 1: Dump the Pydantic model to a plain Python dict</span>
+&nbsp;&nbsp;<span class="v">data</span> = <span class="v">self</span>.<span class="m">model_dump</span>()
+
+&nbsp;&nbsp;<span class="c"># Step 2: Pop 'id', convert UUID → string, store as '_id'</span>
+&nbsp;&nbsp;<span class="v">data</span>[<span class="s">'_id'</span>] = <span class="k">str</span>(<span class="v">data</span>.<span class="m">pop</span>(<span class="s">'id'</span>))
+
+&nbsp;&nbsp;<span class="k">return</span> <span class="v">data</span>
+    </div>
+
+    <div class="format-compare" style="margin-top:14px;">
+      <div class="format-box">
+        <div class="format-title" style="color:#d2a8ff;">
+          <span>🐍</span> BEFORE (Python dict)
+        </div>
+        <div class="code-box" style="border:none;padding:8px 0;background:transparent;">
+{<br>
+&nbsp;&nbsp;<span class="y">"id"</span>: <span class="n">UUID('a1b2c3d4-e5f6...')</span>,<br>
+&nbsp;&nbsp;<span class="y">"first_name"</span>: <span class="s">"Arkajyoti"</span>,<br>
+&nbsp;&nbsp;<span class="y">"last_name"</span>: <span class="s">"Bose"</span><br>
+}
+        </div>
+      </div>
+      <div class="format-box">
+        <div class="format-title" style="color:#ffa657;">
+          <span>🍃</span> AFTER (MongoDB-safe dict)
+        </div>
+        <div class="code-box" style="border:none;padding:8px 0;background:transparent;">
+{<br>
+&nbsp;&nbsp;<span class="y">"_id"</span>: <span class="s">"a1b2c3d4-e5f6..."</span>,<br>
+&nbsp;&nbsp;<span class="y">"first_name"</span>: <span class="s">"Arkajyoti"</span>,<br>
+&nbsp;&nbsp;<span class="y">"last_name"</span>: <span class="s">"Bose"</span><br>
+}
+        </div>
+      </div>
+    </div>
+
+    <div class="tags" style="margin-top:12px;">
+      <span class="tag tag-orange">id  →  _id (key rename)</span>
+      <span class="tag tag-orange">UUID object  →  plain string</span>
+      <span class="tag tag-blue">All other fields pass through unchanged</span>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="method-label">collection.insert_one(data) — pymongo writes to MongoDB</div>
+    <div class="arrow-line"></div>
+    <div class="arrow-head"></div>
+  </div>
+
+  <!-- STAGE 5: MONGODB STORAGE -->
+  <div class="stage mongo-bg">
+    <div class="stage-header">
+      <div class="stage-icon mongo-icon">🍃</div>
+      <div>
+        <div class="stage-title mongo-title">Stage 5 — MongoDB Storage (Persisted on Disk)</div>
+        <div class="stage-sub">Collection name = class name (e.g. "UserDocument"). Document lives here permanently.</div>
+      </div>
+    </div>
+
+    <div class="code-label">What MongoDB actually stores (BSON document on disk):</div>
+    <div class="code-box">
+<span class="c">// MongoDB collection: "UserDocument"</span>
+{
+&nbsp;&nbsp;<span class="y">"_id"</span>:        <span class="s">"a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"</span>,
+&nbsp;&nbsp;<span class="y">"first_name"</span>: <span class="s">"Arkajyoti"</span>,
+&nbsp;&nbsp;<span class="y">"last_name"</span>:  <span class="s">"Bose"</span>
+}
+    </div>
+
+    <div class="tags">
+      <span class="tag tag-orange">_id = our UUID string (overrides Mongo's default ObjectId)</span>
+      <span class="tag tag-green">Stored in local Docker container (Docker Compose)</span>
+      <span class="tag tag-blue">Port 27017 on localhost</span>
+    </div>
+  </div>
+
+  <div class="arrow">
+    <div class="arrow-line"></div>
+    <div class="method-label">cls.from_mongo(doc) — when reading back from Mongo</div>
+    <div class="arrow-line"></div>
+    <div class="arrow-head"></div>
+  </div>
+
+  <!-- STAGE 6: READING BACK -->
+  <div class="stage" style="border-color:#3d5a80; background:#111820;">
+    <div class="stage-header">
+      <div class="stage-icon" style="background:#1a3a5c;">📖</div>
+      <div>
+        <div class="stage-title" style="color:#79c0ff;">Stage 6 — Reading Back (from_mongo)</div>
+        <div class="stage-sub">Reverse transformation. MongoDB dict → typed Python object.</div>
+      </div>
+    </div>
+
+    <div class="code-label">from_mongo() execution:</div>
+    <div class="code-box">
+<span class="k">def</span> <span class="m">from_mongo</span>(<span class="v">cls</span>, <span class="v">data</span>: <span class="k">dict</span>):
+&nbsp;&nbsp;<span class="k">if</span> <span class="s">'_id'</span> <span class="k">in</span> <span class="v">data</span>:
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="v">data</span>[<span class="s">'id'</span>] = <span class="v">data</span>.<span class="m">pop</span>(<span class="s">'_id'</span>)
+&nbsp;&nbsp;<span class="k">return</span> <span class="v">cls</span>(**<span class="v">data</span>)
+&nbsp;&nbsp;<span class="c"># Pydantic coerces string → UUID automatically</span>
+    </div>
+
+    <div class="format-compare" style="margin-top:14px;">
+      <div class="format-box">
+        <div class="format-title" style="color:#ffa657;">
+          <span>🍃</span> FROM Mongo (raw dict)
+        </div>
+        <div class="code-box" style="border:none;padding:8px 0;background:transparent;">
+{<br>
+&nbsp;&nbsp;<span class="y">"_id"</span>: <span class="s">"a1b2c3d4-..."</span>,<br>
+&nbsp;&nbsp;<span class="y">"first_name"</span>: <span class="s">"Arkajyoti"</span>,<br>
+&nbsp;&nbsp;<span class="y">"last_name"</span>: <span class="s">"Bose"</span><br>
+}
+        </div>
+      </div>
+      <div class="format-box">
+        <div class="format-title" style="color:#79c0ff;">
+          <span>🐍</span> BACK TO Python Object
+        </div>
+        <div class="code-box" style="border:none;padding:8px 0;background:transparent;">
+<span class="v">UserDocument</span> {<br>
+&nbsp;&nbsp;<span class="y">id</span>: <span class="n">UUID('a1b2...')</span>,<br>
+&nbsp;&nbsp;<span class="y">first_name</span>: <span class="s">"Arkajyoti"</span>,<br>
+&nbsp;&nbsp;<span class="y">last_name</span>: <span class="s">"Bose"</span><br>
+}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FULL CYCLE SUMMARY -->
+  <div style="width:100%;margin-top:24px;">
+    <div class="section-label">Complete Round-Trip Summary</div>
+    <div class="stage" style="border-color:#388bfd44;">
+      <div class="code-label">Format at each stage:</div>
+      <div class="code-box">
+<span class="c">───────────────────────────────────────────────────────────────────────</span>
+<span class="k">Stage</span>               <span class="y">id field</span>                        <span class="y">key name</span>
+<span class="c">───────────────────────────────────────────────────────────────────────</span>
+<span class="n">1. Python creation</span>  <span class="n">UUID('a1b2...')</span>  Python object    <span class="g">id</span>
+<span class="n">2. to_mongo()        </span><span class="s">'a1b2c3d4-...'</span>   plain string     <span class="g">_id</span>   ← renamed
+<span class="n">3. Mongo disk</span>        <span class="s">'a1b2c3d4-...'</span>   plain string     <span class="g">_id</span>
+<span class="n">4. from_mongo()      </span><span class="s">'a1b2c3d4-...'</span>   string (temp)    <span class="g">id</span>    ← renamed back
+<span class="n">5. Python object</span>     <span class="n">UUID('a1b2...')</span>  Python object    <span class="g">id</span>    ← Pydantic coerces
+<span class="c">───────────────────────────────────────────────────────────────────────</span>
+
+<span class="c">Key insight: your Python code ALWAYS sees a UUID object named 'id'</span>
+<span class="c">            MongoDB ALWAYS sees a string named '_id'</span>
+<span class="c">            NoSQLBaseDocument bridges the gap transparently</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- CRAWLER EXAMPLE -->
+  <div style="width:100%;margin-top:24px;">
+    <div class="section-label">Bonus — ArticleDocument (from MediumCrawler, richer example)</div>
+    <div class="stage crawler-bg">
+      <div class="code-label">What gets stored for a crawled Medium article:</div>
+      <div class="code-box">
+<span class="c"># Python object created by MediumCrawler</span>
+<span class="v">ArticleDocument</span> {
+&nbsp;&nbsp;<span class="y">id</span>:        <span class="n">UUID('f9e8d7c6-...')</span>,
+&nbsp;&nbsp;<span class="y">platform</span>:  <span class="s">"medium"</span>,
+&nbsp;&nbsp;<span class="y">link</span>:      <span class="s">"https://medium.com/@user/my-post"</span>,
+&nbsp;&nbsp;<span class="y">content</span>:   {
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="s">"title"</span>:    <span class="s">"How I built a RAG system"</span>,
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="s">"subtitle"</span>: <span class="s">"A practical guide"</span>,
+&nbsp;&nbsp;&nbsp;&nbsp;<span class="s">"text"</span>:     <span class="s">"Full article text here..."</span>
+&nbsp;&nbsp;},
+&nbsp;&nbsp;<span class="y">author_id</span>: <span class="n">UUID('a1b2c3d4-...')</span>
+}
+
+<span class="c">──────────────── after to_mongo() ────────────────</span>
+
+{
+&nbsp;&nbsp;<span class="y">"_id"</span>:       <span class="s">"f9e8d7c6-..."</span>,
+&nbsp;&nbsp;<span class="y">"platform"</span>: <span class="s">"medium"</span>,
+&nbsp;&nbsp;<span class="y">"link"</span>:     <span class="s">"https://medium.com/..."</span>,
+&nbsp;&nbsp;<span class="y">"content"</span>:  { <span class="s">"title"</span>: ..., <span class="s">"text"</span>: ... },
+&nbsp;&nbsp;<span class="y">"author_id"</span>: <span class="s">"a1b2c3d4-..."</span>
+}
+      </div>
+
+      <div class="tags" style="margin-top:12px;">
+        <span class="tag tag-green">Dedup via: ArticleDocument.find(link=url)</span>
+        <span class="tag tag-blue">author_id links Article → User document</span>
+        <span class="tag tag-orange">Stored in collection "ArticleDocument"</span>
+        <span class="tag tag-purple">content dict feeds into Week 3 cleaning pipeline</span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- LEGEND -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#56d364;"></div> Crawler / Entry Layer</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#d2a8ff;"></div> Python / Pydantic Layer</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#e3b341;"></div> Transformation (to/from_mongo)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ffa657;"></div> MongoDB Storage Layer</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#79c0ff;"></div> Read-back / Deserialisation</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#58a6ff;"></div> Method calls / transitions</div>
+</div>
+
+</body>
+</html>

@@ -118,7 +118,10 @@ moodSwarm/
 │   └── chunk_analysis.py             #   Chunk validation (token distribution stats + PASS/FAIL limit check)
 │
 ├── interview/
-│   └── INTERVIEW_QUESTIONS.md         #   40 interview Q&A derived from this codebase
+│   └── INTERVIEW_QUESTIONS.md         #   41 interview Q&A derived from this codebase
+│
+├── docs/
+│   └── data_save_flow.html            #   Interactive visualization of the data save flow
 │
 ├── data/data_warehouse_raw_data/       #   Pre-crawled JSON data for offline import
 ├── docker-compose.yml                  #   MongoDB + Qdrant containers
@@ -205,6 +208,154 @@ graph TD
     H --> |"EmbeddingDispatcher (batch=10)"| I["EmbeddedChunks (384-dim)"]
     I --> E2[load_to_vector_db]
     E2 --> F2["Qdrant: embedded_* collections"]
+```
+
+---
+
+## 🔀 End-to-End Data Flow: How Data is Saved & Transformed
+
+> 📄 **Interactive version:** Open [`docs/data_save_flow.html`](docs/data_save_flow.html) in a browser for a styled, step-by-step visualization.
+
+### Complete Data Lifecycle
+```mermaid
+sequenceDiagram
+    participant URL as 🌐 URL
+    participant Crawler as CrawlerDispatcher
+    participant PyObj as 🐍 Python Object
+    participant ODM as NoSQLBaseDocument
+    participant Mongo as 🍃 MongoDB
+    participant FE as Feature Pipeline
+    participant Clean as CleaningDispatcher
+    participant Chunk as ChunkingDispatcher
+    participant Embed as EmbeddingDispatcher
+    participant VecODM as VectorBaseDocument
+    participant Qdrant as 🔷 Qdrant
+
+    Note over URL,Mongo: WEEK 2 — ETL Pipeline
+    URL->>Crawler: URL string
+    Crawler->>Crawler: Regex match → pick crawler
+    Crawler->>PyObj: ArticleDocument(id=UUID, content=..., link=...)
+    PyObj->>ODM: .save()
+    ODM->>ODM: to_mongo(): id→_id, UUID→string
+    ODM->>Mongo: insert_one(dict)
+
+    Note over Mongo,Qdrant: WEEK 3 — Feature Pipeline
+    Mongo->>ODM: find() returns raw dict
+    ODM->>ODM: from_mongo(): _id→id, string→UUID
+    ODM->>FE: List of ArticleDocument objects
+    FE->>Clean: Per document
+    Clean->>Clean: Regex normalize text
+    Clean->>Chunk: CleanedArticleDocument
+    Chunk->>Chunk: Split into chunks (sentence-aware)
+    Chunk->>Embed: List of ArticleChunks
+    Embed->>Embed: MiniLM encode → 384-dim vectors
+    Embed->>VecODM: EmbeddedArticleChunk(embedding=[...])
+    VecODM->>VecODM: to_point(): extract vector from payload
+    VecODM->>Qdrant: bulk_insert(PointStruct)
+```
+
+### ODM Transformation: How Python ↔ Database Bridging Works
+
+The project uses **two custom ODM layers** that transparently handle format conversion:
+
+#### MongoDB ODM (`NoSQLBaseDocument`)
+| Stage | `id` field | Key name | Type |
+|-------|-----------|----------|------|
+| **Python creation** | `UUID('a1b2c3d4-...')` | `id` | Python UUID object |
+| **`to_mongo()`** | `'a1b2c3d4-...'` | `_id` | Plain string ← renamed |
+| **MongoDB disk** | `'a1b2c3d4-...'` | `_id` | BSON string |
+| **`from_mongo()`** | `'a1b2c3d4-...'` → `UUID(...)` | `id` | Pydantic coerces back |
+
+```python
+# SAVE: Python → MongoDB
+def to_mongo(self) -> dict:
+    data = self.model_dump()
+    data['_id'] = str(data.pop('id'))   # UUID object → string, 'id' → '_id'
+    return data
+
+# LOAD: MongoDB → Python
+def from_mongo(cls, data: dict):
+    if '_id' in data:
+        data['id'] = data.pop('_id')    # '_id' → 'id'
+    return cls(**data)                   # Pydantic coerces string → UUID
+```
+
+#### Qdrant ODM (`VectorBaseDocument`)
+| Stage | Key transformation | Purpose |
+|-------|-------------------|---------|
+| **`to_point()`** | Extract `embedding` from payload, convert `numpy` → `list` | Qdrant needs vectors separate from payload |
+| **`from_record()`** | Merge `record.id` + `record.payload`, conditionally set `embedding` | Reconstruct full Python object from Qdrant record |
+
+```python
+# SAVE: Python → Qdrant
+def to_point(self) -> PointStruct:
+    data = self.model_dump()
+    vector = data.pop("embedding", [])
+    _id = str(data.pop("id"))
+    return PointStruct(id=_id, vector=vector, payload=data)
+
+# LOAD: Qdrant → Python
+def from_record(cls, record) -> "VectorBaseDocument":
+    payload = record.payload or {}
+    payload["id"] = record.id
+    if cls._has_class_attribute("embedding"):
+        payload["embedding"] = record.vector
+    return cls(**payload)
+```
+
+### Data Object Shapes at Each Stage
+
+```
+URL: "https://medium.com/@user/my-post"
+                    │
+                    ▼
+┌─ ArticleDocument (Python) ──────────────────────────┐
+│  id:        UUID('f9e8d7c6-...')                     │──── .save() → to_mongo()
+│  platform:  "medium"                                 │
+│  link:      "https://medium.com/@user/my-post"       │
+│  content:   {"title": "...", "text": "..."}          │
+│  author_id: UUID('a1b2c3d4-...')                     │
+└──────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌─ MongoDB Document (BSON on disk) ────────────────────┐
+│  _id:       "f9e8d7c6-..."          ← UUID → string  │
+│  platform:  "medium"                                  │
+│  link:      "https://medium.com/..."                  │
+│  content:   {"title": "...", "text": "..."}           │
+│  author_id: "a1b2c3d4-..."          ← UUID → string  │
+└───────────────────────────────────────────────────────┘
+                    │
+                    ▼  CleaningDispatcher
+┌─ CleanedArticleDocument (Qdrant payload-only) ───────┐
+│  id:        UUID(MD5(content))       ← deterministic  │
+│  content:   "cleaned plain text..."  ← regex cleaned  │
+│  platform:  "medium"                                  │
+│  author_id: UUID('a1b2c3d4-...')                      │
+└───────────────────────────────────────────────────────┘
+                    │
+                    ▼  ChunkingDispatcher (1000-2000 chars, sentence-aware)
+┌─ ArticleChunk ───────────────────────────────────────┐
+│  id:        UUID(MD5(chunk_content)) ← per-chunk ID   │
+│  content:   "one paragraph chunk..."                  │
+│  chunk_id:  0                                         │
+│  metadata:  {chunk_size: 500, overlap: 50}            │
+└───────────────────────────────────────────────────────┘
+                    │
+                    ▼  EmbeddingDispatcher (MiniLM, batch=10)
+┌─ EmbeddedArticleChunk ──────────────────────────────┐
+│  id:        UUID(MD5(chunk_content))                  │
+│  content:   "one paragraph chunk..."                  │
+│  embedding: [0.023, -0.156, ..., 0.089]  ← 384 floats│──── .to_point()
+│  metadata:  {model: "all-MiniLM-L6-v2", dim: 384}   │
+└──────────────────────────────────────────────────────┘
+                    │
+                    ▼
+┌─ Qdrant PointStruct ─────────────────────────────────┐
+│  id:      "f9e8d7c6-..."                              │
+│  vector:  [0.023, -0.156, ..., 0.089]  ← separate    │
+│  payload: {content: "...", platform: "medium", ...}   │
+└───────────────────────────────────────────────────────┘
 ```
 
 ---
