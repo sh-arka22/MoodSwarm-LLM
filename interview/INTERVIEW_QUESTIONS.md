@@ -670,10 +670,40 @@ class DataCategory(StrEnum):
 
 ---
 
+**Q41. The repo includes `tools/chunk_analysis.py` — a post-pipeline validation tool. Walk through what it validates, how, and why this matters for production ML.**
+
+*Actual code (`tools/chunk_analysis.py`):*
+```python
+def main(collection, max_tokens):
+    model = EmbeddingModelSingleton()
+    tokenizer = model._model.tokenizer
+    # Scrolls all points from embedded_* collections
+    for col_name in target_names:
+        records = _scroll_all_points(col_name)
+        for record in records:
+            content = record.payload.get("content", "")
+            tokens = tokenizer.encode(content, add_special_tokens=False)
+            if len(tokens) > max_tokens:
+                over_limit.append(...)  # FAIL
+        # Reports min/max/avg token counts per collection
+```
+
+*Expected answer:*
+- **What:** Validates that no chunk in Qdrant exceeds the embedding model's 256-token input limit
+- **How:** Scrolls all points from `embedded_*` collections, tokenizes each chunk's content using the *same tokenizer* used for embedding, and reports min/max/avg token distributions with a PASS/FAIL verdict
+- **Why it matters:**
+  - Chunks exceeding the model's max input length get silently truncated during embedding → lost information → degraded retrieval quality
+  - This is a **data quality gate** — in production CI/CD, you would run this after every pipeline execution and fail the deployment if any chunks violate the limit
+  - The two-stage chunking was specifically patched (adding `SentenceTransformersTokenTextSplitter` as a second stage in `chunk_article()`) to ensure this validation always passes
+  - Using the model's *own tokenizer* (not character count) is critical because token ≠ character — "machine learning" is 2 tokens but 16 characters
+
+---
+
 > 💡 **Tip for the Interviewer:**
 > - Questions **1-7** test **data engineering & ETL** understanding
 > - Questions **8-15** test **feature pipeline & domain modeling** depth
 > - Questions **16-23** test **NLP & vector search** knowledge
 > - Questions **24-28** test **software engineering & MLOps** maturity
 > - Questions **29-35** test **ML theory & math foundations**
-> - Questions **36-40** test **applied judgment & system thinking**
+> - Questions **36-41** test **applied judgment, testing & system thinking**
+

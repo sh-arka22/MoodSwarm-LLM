@@ -114,7 +114,8 @@ moodSwarm/
 ├── tools/                              # CLI Utilities
 │   ├── run.py                         #   Main CLI (--run-smoke-test | --run-etl | --run-feature-engineering)
 │   ├── data_warehouse.py              #   MongoDB export/import (JSON backup/restore)
-│   └── qdrant_inspect.py             #   Qdrant CLI (list-collections, stats, sample, semantic search)
+│   ├── qdrant_inspect.py             #   Qdrant CLI (list-collections, stats, sample, semantic search)
+│   └── chunk_analysis.py             #   Chunk validation (token distribution stats + PASS/FAIL limit check)
 │
 ├── interview/
 │   └── INTERVIEW_QUESTIONS.md         #   40 interview Q&A derived from this codebase
@@ -140,10 +141,11 @@ moodSwarm/
   - **Cleaned:** `CleanedPostDocument`, `CleanedArticleDocument`, `CleanedRepositoryDocument`
   - **Chunks:** `PostChunk`, `ArticleChunk`, `RepositoryChunk` (deterministic UUIDs)
   - **Embedded:** `EmbeddedPostChunk`, `EmbeddedArticleChunk`, `EmbeddedRepositoryChunk` (384-dim vectors)
-- **Chunking Strategies:**
-  - Posts: 250 tokens / 25 overlap
-  - Articles: 1000–2000 chars, sentence-aware
-  - Repositories: 1500 tokens / 100 overlap
+- **Chunking Strategies (Two-Stage):**
+  - Posts: 250 tokens / 25 overlap → token-capped at 256
+  - Articles: 1000–2000 chars sentence-aware → token-capped at 256
+  - Repositories: 1500 tokens / 100 overlap → token-capped at 256
+- **Validation:** `tools/chunk_analysis.py` scans all embedded collections, reports min/max/avg token counts per collection, and PASS/FAIL checks against the 256-token model limit
 - **Tooling:** Built `tools/qdrant_inspect.py` CLI for listing collections, sampling points, and running semantic searches
 - **Design Patterns:** Strategy (handlers), Factory (handler factories), Dispatcher (category routing), Singleton (embedding model)
 
@@ -238,7 +240,16 @@ poetry run python tools/qdrant_inspect.py sample embedded_articles --limit 3
 poetry run python tools/qdrant_inspect.py search embedded_articles --query "machine learning deployment"
 ```
 
-### 4. Data Backup/Restore
+### 4. Validate Chunk Quality
+```bash
+# Analyze token distributions across all embedded_* collections
+poetry run python tools/chunk_analysis.py
+
+# Check a specific collection
+poetry run python tools/chunk_analysis.py --collection embedded_articles
+```
+
+### 5. Data Backup/Restore
 ```bash
 # Export MongoDB → JSON
 poetry run python tools/data_warehouse.py --export-raw-data
@@ -247,7 +258,7 @@ poetry run python tools/data_warehouse.py --export-raw-data
 poetry run python tools/data_warehouse.py --import-raw-data
 ```
 
-### 5. Monitoring
+### 6. Monitoring
 ```bash
 poetry run zenml login --local
 ```
@@ -256,7 +267,7 @@ poetry run zenml login --local
 
 ## 🎓 Interview Preparation
 
-A comprehensive set of **40 interview questions** derived directly from this codebase is available at [`interview/INTERVIEW_QUESTIONS.md`](interview/INTERVIEW_QUESTIONS.md). Topics covered:
+A comprehensive set of **41 interview questions** derived directly from this codebase is available at [`interview/INTERVIEW_QUESTIONS.md`](interview/INTERVIEW_QUESTIONS.md). Topics covered:
 - System Architecture & FTI Design
 - Data Engineering & ETL Patterns
 - Feature Pipeline (Clean → Chunk → Embed)
@@ -267,3 +278,4 @@ A comprehensive set of **40 interview questions** derived directly from this cod
 - MLOps & Pipeline Orchestration
 - Model Training (QLoRA, SFT, DPO)
 - Mathematical Foundations
+- Testing & Validation (chunk quality gates)
