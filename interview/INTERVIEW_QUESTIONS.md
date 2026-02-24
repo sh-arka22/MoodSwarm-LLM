@@ -699,6 +699,108 @@ def main(collection, max_tokens):
 
 ---
 
+## 13. RAG Retrieval & Query Embedding
+
+**Q42. The `domain/queries.py` defines `Query` and `EmbeddedQuery` models. Why create separate domain models for queries instead of reusing `Chunk` classes?**
+
+*Actual code (`domain/queries.py`):*
+```python
+class Query(VectorBaseDocument):
+    content: str
+    author_id: UUID4 | None = None
+    author_full_name: str | None = None
+    metadata: dict = Field(default_factory=dict)
+
+    class Config:
+        name = "queries"
+        category = DataCategory.QUERIES
+        use_vector_index = True
+
+    @classmethod
+    def from_str(cls, query: str) -> "Query":
+        return Query(content=query.strip("\n "))
+
+    def replace_content(self, new_content: str) -> "Query":
+        return Query(id=self.id, content=new_content, ...)
+```
+
+*Expected answer:*
+- Queries have different semantics than chunks — a query has no `document_id`, `chunk_id`, `platform`, or `link`
+- The `from_str()` factory method provides a clean API for query creation with automatic whitespace stripping
+- `replace_content()` enables query rewriting/expansion while preserving identity — useful for future HyDE (Hypothetical Document Embedding) or query expansion patterns
+- Separate models enable query logging/analytics in a dedicated Qdrant collection (`queries`)
+- This follows DDD principles — queries are a distinct domain concept, not a repurposed chunk
+
+---
+
+**Q43. Trace the end-to-end RAG retrieval flow in `tools/search_test.py`. How does a user's text query become ranked results?**
+
+*Actual code (`tools/search_test.py`):*
+```python
+def search_all(query_text: str, k: int = 3) -> list:
+    query = Query.from_str(query_text)
+    embedded_query: EmbeddedQuery = EmbeddingDispatcher.dispatch(query)
+
+    all_results = []
+    for cls in EMBEDDED_CLASSES:
+        results = cls.search(query_vector=embedded_query.embedding, limit=k)
+        all_results.extend(results)
+    return all_results
+```
+
+*Expected answer:*
+1. **Text → Query object**: `Query.from_str("machine learning")` creates a `Query` domain model
+2. **Query → Embedded**: `EmbeddingDispatcher.dispatch(query)` detects `DataCategory.QUERIES`, routes to `QueryEmbeddingHandler`, which encodes via `all-MiniLM-L6-v2` → 384-dim vector
+3. **Embedded → Search**: For each of the 3 embedded collection classes, calls `cls.search(query_vector=..., limit=k)` which executes Qdrant ANN search using cosine similarity
+4. **Results → Display**: Merged results are formatted with collection name, author metadata, and content preview
+- Key insight: The query is embedded using the *same model* as the document chunks — this ensures they occupy the same vector space, making cosine similarity meaningful
+
+---
+
+**Q44. The `EmbeddingDispatcher` was extended to support queries without modifying any existing handler classes. Walk through the changes and explain which design principle this demonstrates.**
+
+*Actual changes:*
+```python
+# embedding_data_handlers.py — NEW handler added
+class QueryEmbeddingHandler(EmbeddingDataHandler):
+    def map_model(self, data_model: Query, embedding: list[float]) -> EmbeddedQuery:
+        return EmbeddedQuery(id=data_model.id, content=data_model.content, embedding=embedding, ...)
+
+# dispatchers.py — Factory extended
+class EmbeddingHandlerFactory:
+    def create_handler(self, data_category: DataCategory) -> EmbeddingDataHandler:
+        if data_category == DataCategory.QUERIES:
+            return QueryEmbeddingHandler()     # ← new branch
+        elif data_category == DataCategory.POSTS:
+            return PostEmbeddingHandler()       # ← untouched
+        ...
+```
+
+*Expected answer:*
+- **Open/Closed Principle**: The system is open for extension (new `QueryEmbeddingHandler`) but closed for modification (existing `PostEmbeddingHandler`, `ArticleEmbeddingHandler`, `RepositoryEmbeddingHandler` are untouched)
+- The type generics were also widened: `TypeVar("ChunkT", bound=VectorBaseDocument)` instead of `bound=Chunk` — this allows `Query` (which isn't a `Chunk`) to flow through the same `EmbeddingDataHandler.embed_batch()` logic
+- Adding a new data type requires exactly 2 changes: (1) new handler class, (2) new elif in factory — the dispatcher, base handler, and all existing handlers remain unchanged
+
+---
+
+**Q45. `search_test.py` searches across all 3 embedded collections (`posts`, `articles`, `repositories`) independently. What are the pros and cons of this approach vs. a single unified collection?**
+
+*Expected answer:*
+- **Multi-collection (current approach):**
+  - ✅ Per-type schemas — each class has different fields (`link` for articles, `name` for repos)
+  - ✅ Independent scaling — can shard high-volume collections separately
+  - ✅ Selective search — can search only articles if context demands it
+  - ❌ Multiple network round-trips (3 queries instead of 1)
+  - ❌ No cross-collection ranking — results from different collections aren't comparably scored
+- **Single unified collection (alternative):**
+  - ✅ Single query, globally ranked results
+  - ✅ Simpler architecture
+  - ❌ Schema compromises — need nullable fields or a generic `payload` dict
+  - ❌ No ability to scope by content type without payload filtering
+- Future improvement: use a **reranker** (`CrossEncoderModelSingleton`) to re-score merged results from all collections into a single ranked list
+
+---
+
 > 💡 **Tip for the Interviewer:**
 > - Questions **1-7** test **data engineering & ETL** understanding
 > - Questions **8-15** test **feature pipeline & domain modeling** depth
@@ -706,4 +808,5 @@ def main(collection, max_tokens):
 > - Questions **24-28** test **software engineering & MLOps** maturity
 > - Questions **29-35** test **ML theory & math foundations**
 > - Questions **36-41** test **applied judgment, testing & system thinking**
+> - Questions **42-45** test **RAG retrieval & query embedding** depth
 
