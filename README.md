@@ -70,6 +70,7 @@ moodSwarm/
 │   │   ├── cleaned_documents.py       #   CleanedArticleDocument, CleanedPostDocument, CleanedRepositoryDocument
 │   │   ├── chunks.py                  #   ArticleChunk, PostChunk, RepositoryChunk
 │   │   ├── embedded_chunks.py         #   EmbeddedArticleChunk, EmbeddedPostChunk, EmbeddedRepositoryChunk
+│   │   ├── queries.py                 #   Query, EmbeddedQuery (RAG retrieval query models)
 │   │   ├── types.py                   #   DataCategory enum (posts, articles, repositories, prompts, datasets...)
 │   │   └── exceptions.py             #   LLMTwinException, ImproperlyConfigured
 │   │
@@ -115,7 +116,8 @@ moodSwarm/
 │   ├── run.py                         #   Main CLI (--run-smoke-test | --run-etl | --run-feature-engineering)
 │   ├── data_warehouse.py              #   MongoDB export/import (JSON backup/restore)
 │   ├── qdrant_inspect.py             #   Qdrant CLI (list-collections, stats, sample, semantic search)
-│   └── chunk_analysis.py             #   Chunk validation (token distribution stats + PASS/FAIL limit check)
+│   ├── chunk_analysis.py             #   Chunk validation (token distribution stats + PASS/FAIL limit check)
+│   └── search_test.py               #   End-to-end semantic search across all embedded collections
 │
 ├── interview/
 │   └── INTERVIEW_QUESTIONS.md         #   41 interview Q&A derived from this codebase
@@ -132,7 +134,21 @@ moodSwarm/
 
 ## 📅 Engineering Journal
 
-### 🔄 Week 3: RAG Feature Pipeline *(In Progress)*
+### 🔄 Week 4: RAG Retrieval Layer *(In Progress)*
+**Objective:** Enable semantic search queries against the vector store.
+
+- **Query Domain Models:** `Query` and `EmbeddedQuery` in `domain/queries.py` — Pydantic models for representing user search queries
+  - `Query.from_str()` factory method for convenient query creation
+  - `EmbeddedQuery` extends `Query` with a 384-dim embedding vector
+- **Query Embedding:** `QueryEmbeddingHandler` added to `EmbeddingDispatcher` — reuses the same `EmbeddingModelSingleton` (bi-encoder) to embed queries into the same vector space as document chunks
+- **Polymorphic Extension:** `EmbeddingDispatcher` now handles `DataCategory.QUERIES` alongside posts/articles/repositories — demonstrates Open/Closed Principle (new handler, no existing code modified)
+- **Semantic Search CLI:** `tools/search_test.py` — end-to-end search tool that:
+  1. Accepts a query string via CLI
+  2. Embeds it using `EmbeddingDispatcher.dispatch()`
+  3. Searches across all 3 embedded collections (`embedded_posts`, `embedded_articles`, `embedded_repositories`)
+  4. Displays ranked results with author, collection, and content preview
+
+### ✅ Week 3: RAG Feature Pipeline
 **Objective:** Transform raw text → searchable vectors in Qdrant.
 
 - **Pipeline:** `feature_engineering` with 4 ZenML steps:
@@ -387,8 +403,17 @@ poetry run python tools/qdrant_inspect.py list-collections
 # View sample points
 poetry run python tools/qdrant_inspect.py sample embedded_articles --limit 3
 
-# Semantic search
+# Semantic search (via qdrant_inspect)
 poetry run python tools/qdrant_inspect.py search embedded_articles --query "machine learning deployment"
+```
+
+### 3b. End-to-End Semantic Search
+```bash
+# Search across ALL embedded collections at once
+poetry run python tools/search_test.py --query "machine learning deployment"
+
+# Custom number of results per collection
+poetry run python tools/search_test.py --query "data pipelines" --k 5
 ```
 
 ### 4. Validate Chunk Quality
@@ -418,7 +443,7 @@ poetry run zenml login --local
 
 ## 🎓 Interview Preparation
 
-A comprehensive set of **41 interview questions** derived directly from this codebase is available at [`interview/INTERVIEW_QUESTIONS.md`](interview/INTERVIEW_QUESTIONS.md). Topics covered:
+A comprehensive set of **45 interview questions** derived directly from this codebase is available at [`interview/INTERVIEW_QUESTIONS.md`](interview/INTERVIEW_QUESTIONS.md). Topics covered:
 - System Architecture & FTI Design
 - Data Engineering & ETL Patterns
 - Feature Pipeline (Clean → Chunk → Embed)
@@ -427,6 +452,7 @@ A comprehensive set of **41 interview questions** derived directly from this cod
 - Vector Databases & Similarity Search
 - Software Design Patterns (Strategy, Factory, Dispatcher, Singleton)
 - MLOps & Pipeline Orchestration
+- RAG Retrieval & Query Embedding
 - Model Training (QLoRA, SFT, DPO)
 - Mathematical Foundations
 - Testing & Validation (chunk quality gates)
