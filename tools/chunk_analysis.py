@@ -1,7 +1,6 @@
 """Chunk analysis CLI — analyze chunk sizes and token distributions per Qdrant collection."""
 
 import click
-from loguru import logger
 
 from llm_engineering.infrastructure.db.qdrant import connection
 

@@ -1,7 +1,6 @@
 """Qdrant inspection CLI — list, stats, sample, and search collections."""
 
 import click
-from loguru import logger
 
 from llm_engineering.infrastructure.db.qdrant import connection
 
