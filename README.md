@@ -4,6 +4,19 @@
 
 ![MoodSwarm Architecture](moodswarm.png)
 
+### Progress
+
+| Week | Phase | Status |
+|------|-------|--------|
+| 1 | Infrastructure & Environment Setup | Done |
+| 2 | Digital Data ETL Pipeline | Done |
+| 3 | RAG Feature Pipeline & Semantic Search | Done |
+| 4 | RAG Retrieval & Inference | Next |
+| 5 | Instruction Dataset & SFT Training | Pending |
+| 6 | DPO Preference Alignment & Evaluation | Pending |
+| 7 | Inference Optimization & Deployment | Pending |
+| 8 | MLOps, Monitoring & Capstone | Pending |
+
 ---
 
 ## 🏗️ System Architecture
@@ -134,39 +147,51 @@ moodSwarm/
 
 ## 📅 Engineering Journal
 
-### 🔄 Week 4: RAG Retrieval Layer *(In Progress)*
-**Objective:** Enable semantic search queries against the vector store.
+### 🔜 Week 4: RAG Retrieval & Inference *(Next)*
+**Objective:** Advanced retrieval with query expansion, reranking, and baseline quality metrics.
 
-- **Query Domain Models:** `Query` and `EmbeddedQuery` in `domain/queries.py` — Pydantic models for representing user search queries
-  - `Query.from_str()` factory method for convenient query creation
-  - `EmbeddedQuery` extends `Query` with a 384-dim embedding vector
-- **Query Embedding:** `QueryEmbeddingHandler` added to `EmbeddingDispatcher` — reuses the same `EmbeddingModelSingleton` (bi-encoder) to embed queries into the same vector space as document chunks
-- **Polymorphic Extension:** `EmbeddingDispatcher` now handles `DataCategory.QUERIES` alongside posts/articles/repositories — demonstrates Open/Closed Principle (new handler, no existing code modified)
-- **Semantic Search CLI:** `tools/search_test.py` — end-to-end search tool that:
-  1. Accepts a query string via CLI
-  2. Embeds it using `EmbeddingDispatcher.dispatch()`
-  3. Searches across all 3 embedded collections (`embedded_posts`, `embedded_articles`, `embedded_repositories`)
-  4. Displays ranked results with author, collection, and content preview
+- Self-query metadata extraction, query expansion, filtered vector search
+- Reranking with CrossEncoder post-retrieval optimization
+- Recall@K, MRR baselines and regression test set
 
-### ✅ Week 3: RAG Feature Pipeline
-**Objective:** Transform raw text → searchable vectors in Qdrant.
+### ✅ Week 3: RAG Feature Pipeline & Semantic Search
+**Objective:** Transform raw text into searchable vectors in Qdrant, with end-to-end query capability.
 
-- **Pipeline:** `feature_engineering` with 4 ZenML steps:
-  1. `query_data_warehouse` — concurrent MongoDB fetch via `ThreadPoolExecutor`
-  2. `clean_documents` — regex normalization per data category
-  3. `chunk_and_embed` — type-specific splitting + SentenceTransformer encoding
-  4. `load_to_vector_db` — batched upsert into Qdrant (called twice: cleaned + embedded)
-- **Domain Models:** 9 new classes across 3 transformation layers:
-  - **Cleaned:** `CleanedPostDocument`, `CleanedArticleDocument`, `CleanedRepositoryDocument`
-  - **Chunks:** `PostChunk`, `ArticleChunk`, `RepositoryChunk` (deterministic UUIDs)
-  - **Embedded:** `EmbeddedPostChunk`, `EmbeddedArticleChunk`, `EmbeddedRepositoryChunk` (384-dim vectors)
-- **Chunking Strategies (Two-Stage):**
-  - Posts: 250 tokens / 25 overlap → token-capped at 256
-  - Articles: 1000–2000 chars sentence-aware → token-capped at 256
-  - Repositories: 1500 tokens / 100 overlap → token-capped at 256
-- **Validation:** `tools/chunk_analysis.py` scans all embedded collections, reports min/max/avg token counts per collection, and PASS/FAIL checks against the 256-token model limit
-- **Tooling:** Built `tools/qdrant_inspect.py` CLI for listing collections, sampling points, and running semantic searches
-- **Design Patterns:** Strategy (handlers), Factory (handler factories), Dispatcher (category routing), Singleton (embedding model)
+**Feature Engineering Pipeline** (`feature_engineering`) with 4 ZenML steps:
+1. `query_data_warehouse` — concurrent MongoDB fetch via `ThreadPoolExecutor`
+2. `clean_documents` — regex normalization per data category
+3. `chunk_and_embed` — type-specific splitting + SentenceTransformer encoding
+4. `load_to_vector_db` — batched upsert into Qdrant (called twice: cleaned + embedded)
+
+**Domain Models** — 11 classes across 4 transformation layers:
+- **Cleaned:** `CleanedPostDocument`, `CleanedArticleDocument`, `CleanedRepositoryDocument`
+- **Chunks:** `PostChunk`, `ArticleChunk`, `RepositoryChunk` (deterministic UUIDs via MD5)
+- **Embedded:** `EmbeddedPostChunk`, `EmbeddedArticleChunk`, `EmbeddedRepositoryChunk` (384-dim vectors)
+- **Queries:** `Query`, `EmbeddedQuery` — same embedding flow as chunks, enables RAG search
+
+**Chunking Strategies (Two-Stage):**
+- Posts: 250 tokens / 25 overlap → token-capped at 256
+- Articles: 1000-2000 chars sentence-aware → token-capped at 256
+- Repositories: 1500 tokens / 100 overlap → token-capped at 256
+
+**Query & Search Layer:**
+- `Query.from_str()` factory + `EmbeddedQuery` with 384-dim embedding
+- `QueryEmbeddingHandler` added to `EmbeddingDispatcher` — same bi-encoder, same vector space as chunks
+- `tools/search_test.py` — end-to-end CLI: query string → embed → search all collections → ranked results
+
+**Validation & Tooling:**
+- `tools/chunk_analysis.py` — token distribution analysis with PASS/FAIL limit checks
+- `tools/qdrant_inspect.py` — collection listing, sampling, and semantic search CLI
+- Idempotency verified: re-runs produce identical Qdrant counts
+- All 26 chunks verified at or below 256 token limit
+
+**Design Patterns:** Strategy (handlers), Factory (handler factories), Dispatcher (category routing), Singleton (embedding model), Open/Closed Principle (new QueryEmbeddingHandler without modifying existing handlers)
+
+**Bugs Fixed:**
+- `qdrant-client` API: `connection.search()` does not exist → replaced with `connection.query_points()`
+- Article chunks exceeded 256 token limit (380-443 tokens) → added `SentenceTransformersTokenTextSplitter` as 2nd stage
+
+**Final State:** `cleaned_articles` (3 points) + `embedded_articles` (26 points, 384-dim COSINE)
 
 ### ✅ Week 2: Digital Data ETL Pipeline
 **Objective:** Automated data ingestion from the internet.
@@ -176,6 +201,7 @@ moodSwarm/
 - **Routing:** `CrawlerDispatcher` with regex-based URL matching + fallback
 - **Resilience:** Exponential backoff retries (tenacity), deduplication via `.find(link=link)`
 - **Tooling:** `tools/data_warehouse.py` for MongoDB JSON backup/restore
+- **Result:** 3 articles crawled for Paul Iusztin (14K + 8K + 7K chars), zero duplicates on re-run
 
 ### ✅ Week 1: Infrastructure Foundation
 **Objective:** Reproducible MLOps environment.
@@ -398,40 +424,40 @@ poetry run python -m tools.run --run-feature-engineering --no-cache
 ### 3. Inspect Vector Store
 ```bash
 # List all Qdrant collections
-poetry run python tools/qdrant_inspect.py list-collections
+poetry run python -m tools.qdrant_inspect list-collections
 
 # View sample points
-poetry run python tools/qdrant_inspect.py sample embedded_articles --limit 3
+poetry run python -m tools.qdrant_inspect sample embedded_articles --limit 3
 
 # Semantic search (via qdrant_inspect)
-poetry run python tools/qdrant_inspect.py search embedded_articles --query "machine learning deployment"
+poetry run python -m tools.qdrant_inspect search embedded_articles --query "machine learning deployment"
 ```
 
 ### 3b. End-to-End Semantic Search
 ```bash
 # Search across ALL embedded collections at once
-poetry run python tools/search_test.py --query "machine learning deployment"
+poetry run python -m tools.search_test --query "machine learning deployment"
 
 # Custom number of results per collection
-poetry run python tools/search_test.py --query "data pipelines" --k 5
+poetry run python -m tools.search_test --query "data pipelines" --k 5
 ```
 
 ### 4. Validate Chunk Quality
 ```bash
 # Analyze token distributions across all embedded_* collections
-poetry run python tools/chunk_analysis.py
+poetry run python -m tools.chunk_analysis
 
 # Check a specific collection
-poetry run python tools/chunk_analysis.py --collection embedded_articles
+poetry run python -m tools.chunk_analysis --collection embedded_articles
 ```
 
 ### 5. Data Backup/Restore
 ```bash
 # Export MongoDB → JSON
-poetry run python tools/data_warehouse.py --export-raw-data
+poetry run python -m tools.data_warehouse --export-raw-data
 
 # Import JSON → MongoDB
-poetry run python tools/data_warehouse.py --import-raw-data
+poetry run python -m tools.data_warehouse --import-raw-data
 ```
 
 ### 6. Monitoring
