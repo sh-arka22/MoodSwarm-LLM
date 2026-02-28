@@ -44,9 +44,10 @@ graph LR
     end
 
     subgraph "RAG Retrieval (Week 4)"
+        CR["ContextRetriever"]
         SQ["SelfQuery"]
         QE["QueryExpansion"]
-        RR["Reranker"]
+        RR["Reranker (CrossEncoder)"]
     end
 
     subgraph "Storage Layer"
@@ -61,8 +62,8 @@ graph LR
     D --> MC --> Mongo
     D --> CC --> Mongo
     Mongo --> Clean --> Chunk --> Embed --> Qdrant
-    SQ --> QE --> Qdrant
-    Qdrant --> RR
+    CR --> SQ --> QE --> Qdrant
+    Qdrant --> RR --> CR
 ```
 
 ### Tech Stack
@@ -110,7 +111,9 @@ moodSwarm/
 │   │   │   ├── base.py               #     PromptTemplateFactory (ABC), RAGStep (ABC, mock flag)
 │   │   │   ├── prompt_templates.py   #     QueryExpansionTemplate, SelfQueryTemplate
 │   │   │   ├── self_query.py         #     Author extraction via OpenAI → MongoDB lookup
-│   │   │   └── query_expansion.py    #     N query variants via OpenAI for multi-perspective search
+│   │   │   ├── query_expansion.py    #     N query variants via OpenAI for multi-perspective search
+│   │   │   ├── reranking.py          #     CrossEncoder re-ranker (ms-marco-MiniLM-L-4-v2)
+│   │   │   └── retriever.py          #     ContextRetriever orchestrator (full RAG pipeline)
 │   │   └── utils/                     #   split_user_full_name, batch()
 │   │
 │   ├── infrastructure/                 # External System Adapters
@@ -162,8 +165,8 @@ moodSwarm/
 
 ## 📅 Engineering Journal
 
-### 🔄 Week 4: RAG Retrieval & Inference *(In Progress — Day 2/7)*
-**Objective:** Advanced retrieval with query expansion, reranking, and baseline quality metrics.
+### ✅ Week 4: RAG Retrieval & Inference
+**Objective:** Advanced retrieval with query expansion, reranking, and a fully orchestrated retrieval pipeline.
 
 **RAG Base Layer** (`llm_engineering/application/rag/`):
 - `PromptTemplateFactory` (ABC) + `RAGStep` (ABC with `mock=True` flag for API-free testing)
@@ -176,9 +179,20 @@ moodSwarm/
 - Both use LangChain LCEL composition (`prompt | model`) with `ChatOpenAI(temperature=0)`
 - Both support `mock=True` mode: SelfQuery returns query unchanged, QueryExpansion returns N identical copies
 
-**Dependencies Added:** `langchain-openai ^0.1.3` (ChatOpenAI), `opik ^0.2.2` (LLM observability via `@opik.track`)
+**Reranker** (`reranking.py`):
+- `Reranker(RAGStep)` — uses `CrossEncoderModelSingleton` (`ms-marco-MiniLM-L-4-v2`) to score `(query, chunk)` pairs
+- Sorts by relevance score descending → returns top-K chunks
+- Supports `mock=True` mode (returns chunks unchanged)
 
-**Remaining:** Reranker (CrossEncoder), ContextRetriever orchestrator, E2E test CLI, baseline metrics (Recall@K, MRR)
+**ContextRetriever** (`retriever.py`) — full orchestrator:
+- `SelfQuery` → extract author metadata from query
+- `QueryExpansion` → generate N query variants
+- Parallel `ThreadPoolExecutor` search: embed each expanded query → search across `EmbeddedPostChunk`, `EmbeddedArticleChunk`, `EmbeddedRepositoryChunk` (k/3 per collection)
+- Author-filtered vector search via Qdrant `FieldCondition(key="author_id", match=...)`
+- Deduplication via `set()` (leverages `__eq__`/`__hash__` on UUID `id`)
+- `Reranker` → cross-encoder re-ranking → final top-K results
+
+**Dependencies Added:** `langchain-openai ^0.1.3` (ChatOpenAI), `opik ^0.2.2` (LLM observability via `@opik.track`)
 
 ### ✅ Week 3: RAG Feature Pipeline & Semantic Search
 **Objective:** Transform raw text into searchable vectors in Qdrant, with end-to-end query capability.
@@ -761,7 +775,7 @@ class EmbeddingModelSingleton(metaclass=SingletonMeta):
     def embedding_size(self) -> int:
         return self._model.encode("").shape[0]  # 384
 
-# Cross-Encoder for reranking (loaded, not yet wired into retrieval)
+# Cross-Encoder for reranking (wired into ContextRetriever via Reranker)
 class CrossEncoderModelSingleton(metaclass=SingletonMeta):
     def __init__(self, model_id=settings.RERANKING_CROSS_ENCODER_MODEL_ID):
         self._model = CrossEncoder(model_name=model_id, device=settings.RAG_MODEL_DEVICE)
@@ -771,48 +785,66 @@ class CrossEncoderModelSingleton(metaclass=SingletonMeta):
 
 ---
 
-### RAG Retrieval Pipeline — SelfQuery + QueryExpansion
+### RAG Retrieval Pipeline — Full ContextRetriever Orchestration
 
 ```mermaid
 flowchart TD
     Q_INPUT["User Query String"]
-    Q_INPUT --> SELF_QUERY["SelfQuery<br/>(LLM extracts author name)"]
+    Q_INPUT --> CTX["ContextRetriever.search()"]
+    CTX --> SELF_QUERY["1. SelfQuery<br/>(LLM extracts author name)"]
     SELF_QUERY -->|"name found"| ANNOTATED["Query with author_id set"]
     SELF_QUERY -->|"'none' returned"| PLAIN["Query without filter"]
 
-    ANNOTATED & PLAIN --> EXPANSION["QueryExpansion<br/>(LLM generates N variants)"]
+    ANNOTATED & PLAIN --> EXPANSION["2. QueryExpansion<br/>(LLM generates N variants)"]
     EXPANSION --> Q_LIST["list of Query — original + expansions"]
 
-    Q_LIST --> EMBED_Q["EmbeddingDispatcher<br/>embed each query"]
-    EMBED_Q --> SEARCH["VectorBaseDocument.search()<br/>cosine similarity in Qdrant"]
-    SEARCH --> RESULTS["Retrieved EmbeddedChunks"]
-    RESULTS --> CONTEXT["EmbeddedChunk.to_context()<br/>format as numbered text"]
+    Q_LIST --> PARALLEL["3. ThreadPoolExecutor<br/>parallel search per query"]
+    PARALLEL --> EMBED_Q["EmbeddingDispatcher<br/>embed query"]
+    EMBED_Q --> SEARCH_P["EmbeddedPostChunk.search()"]
+    EMBED_Q --> SEARCH_A["EmbeddedArticleChunk.search()"]
+    EMBED_Q --> SEARCH_R["EmbeddedRepositoryChunk.search()"]
+
+    SEARCH_P & SEARCH_A & SEARCH_R --> DEDUP["4. Flatten + Deduplicate<br/>(set on UUID id)"]
+    DEDUP --> RERANK["5. Reranker<br/>CrossEncoder scores (query, chunk) pairs<br/>sort descending → top-K"]
+    RERANK --> RESULTS["Final top-K EmbeddedChunks"]
 ```
 
 ```python
-# SelfQuery — extract author name from natural language (application/rag/self_query.py)
-class SelfQuery(RAGStep):
-    def generate(self, query: Query) -> Query:
-        prompt = SelfQueryTemplate().create_template()
-        model = ChatOpenAI(model=settings.OPENAI_MODEL_ID, temperature=0)
-        chain = prompt | model
-        response = chain.invoke({"question": query.content})
-        user_full_name = response.content.strip()
-        if user_full_name == "none":
-            return query  # No author filtering
-        user = UserDocument.get_or_create(first_name=..., last_name=...)
-        query.author_id = user.id
-        return query
+# ContextRetriever — full RAG orchestrator (application/rag/retriever.py)
+class ContextRetriever:
+    def __init__(self, mock=False):
+        self._query_expander = QueryExpansion(mock=mock)
+        self._metadata_extractor = SelfQuery(mock=mock)
+        self._reranker = Reranker(mock=mock)
 
-# QueryExpansion — generate N alternative query phrasings (application/rag/query_expansion.py)
-class QueryExpansion(RAGStep):
-    def generate(self, query: Query, expand_to_n: int) -> list[Query]:
-        prompt = QueryExpansionTemplate().create_template(expand_to_n - 1)
-        model = ChatOpenAI(model=settings.OPENAI_MODEL_ID, temperature=0)
-        chain = prompt | model
-        response = chain.invoke({"question": query.content})
-        queries_content = result.strip().split("#next-question#")
-        return [query] + [query.replace_content(c.strip()) for c in queries_content]
+    def search(self, query: str, k: int = 3, expand_to_n_queries: int = 3) -> list:
+        query_model = Query.from_str(query)
+        query_model = self._metadata_extractor.generate(query_model)       # 1. Extract author
+        n_queries = self._query_expander.generate(query_model, expand_to_n=expand_to_n_queries)  # 2. Expand
+
+        with ThreadPoolExecutor() as executor:                              # 3. Parallel search
+            tasks = [executor.submit(self._search, q, k) for q in n_queries]
+            n_k_docs = flatten([t.result() for t in as_completed(tasks)])
+            n_k_docs = list(set(n_k_docs))                                   # 4. Dedup
+
+        return self.rerank(query, chunks=n_k_docs, keep_top_k=k) if n_k_docs else []  # 5. Rerank
+
+    def _search(self, query: Query, k: int = 3) -> list[EmbeddedChunk]:
+        embedded_query = EmbeddingDispatcher.dispatch(query)
+        query_filter = Filter(must=[FieldCondition(key="author_id", ...)]) if embedded_query.author_id else None
+        # Search across all 3 embedded collections (k/3 each)
+        return EmbeddedPostChunk.search(...) + EmbeddedArticleChunk.search(...) + EmbeddedRepositoryChunk.search(...)
+
+# Reranker — CrossEncoder re-ranking (application/rag/reranking.py)
+class Reranker(RAGStep):
+    def __init__(self, mock=False):
+        self._model = CrossEncoderModelSingleton()  # ms-marco-MiniLM-L-4-v2
+
+    def generate(self, query: Query, chunks: list[EmbeddedChunk], keep_top_k: int) -> list[EmbeddedChunk]:
+        if self._mock: return chunks
+        scores = self._model([(query.content, chunk.content) for chunk in chunks])
+        scored = sorted(zip(scores, chunks), key=lambda x: x[0], reverse=True)
+        return [doc for _, doc in scored[:keep_top_k]]
 ```
 
 ---
@@ -827,8 +859,9 @@ flowchart TD
     C --> E["4b. Chunk<br/>Two-stage splitting"]
     E --> F["5. Embed<br/>all-MiniLM-L6-v2<br/>384-dim vectors"]
     F -->|"Qdrant (cosine)"| G["6. Store Embedded Chunks"]
-    G --> H["7. RAG Query<br/>SelfQuery → Expand →<br/>Embed → Search"]
-    H --> I["8. Retrieved Context<br/>Top-K chunks for LLM"]
+    G --> H["7. ContextRetriever<br/>SelfQuery → Expand →<br/>Parallel Search → Dedup"]
+    H --> I["8. Reranker<br/>CrossEncoder scores →<br/>Top-K chunks"]
+    I --> J["9. Retrieved Context<br/>for LLM generation"]
 
     style A fill:#e1f5fe
     style C fill:#fff3e0
@@ -836,6 +869,7 @@ flowchart TD
     style F fill:#e8f5e9
     style G fill:#e8f5e9
     style H fill:#f3e5f5
+    style I fill:#f3e5f5
 ```
 
 ---
