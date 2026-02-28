@@ -34,9 +34,9 @@ class SelfQueryTemplate(PromptTemplateFactory):
 
     For example:
     QUESTION 1:
-    My name is Paul Iusztin and I want a post about...
+    My name is Arkajyoti Saha and I want a post about...
     RESPONSE 1:
-    Paul Iusztin
+    Arkajyoti Saha
 
     QUESTION 2:
     I want to write a post about...

@@ -11,7 +11,7 @@
 | 1 | Infrastructure & Environment Setup | Done |
 | 2 | Digital Data ETL Pipeline | Done |
 | 3 | RAG Feature Pipeline & Semantic Search | Done |
-| 4 | RAG Retrieval & Inference | Next |
+| 4 | RAG Retrieval & Inference | In Progress |
 | 5 | Instruction Dataset & SFT Training | Pending |
 | 6 | DPO Preference Alignment & Evaluation | Pending |
 | 7 | Inference Optimization & Deployment | Pending |
@@ -43,6 +43,12 @@ graph LR
         Embed["EmbeddingDispatcher"]
     end
 
+    subgraph "RAG Retrieval (Week 4)"
+        SQ["SelfQuery"]
+        QE["QueryExpansion"]
+        RR["Reranker"]
+    end
+
     subgraph "Storage Layer"
         Mongo[(MongoDB)]
         Qdrant[(Qdrant)]
@@ -55,6 +61,8 @@ graph LR
     D --> MC --> Mongo
     D --> CC --> Mongo
     Mongo --> Clean --> Chunk --> Embed --> Qdrant
+    SQ --> QE --> Qdrant
+    Qdrant --> RR
 ```
 
 ### Tech Stack
@@ -66,6 +74,8 @@ graph LR
 | Embeddings | **all-MiniLM-L6-v2** | Sentence-level encoding (384 dimensions) |
 | Language | **Python 3.11 + Poetry** | Reproducible dependency management |
 | Containers | **Docker Compose** | Local MongoDB + Qdrant infrastructure |
+| RAG LLM | **OpenAI gpt-4o-mini** | Query expansion, self-query, evaluation (via LangChain) |
+| Observability | **Opik (Comet ML)** | LLM call tracing with `@opik.track` decorator |
 | Architecture | **DDD** | Domain-Driven Design with layered separation |
 
 ---
@@ -96,6 +106,11 @@ moodSwarm/
 │   │   │   ├── embedding_data_handlers.py
 │   │   │   └── operations/            #     Low-level chunking + cleaning regex operations
 │   │   ├── networks/                  #   EmbeddingModelSingleton, CrossEncoderModelSingleton
+│   │   ├── rag/                       #   RAG retrieval pipeline (Week 4)
+│   │   │   ├── base.py               #     PromptTemplateFactory (ABC), RAGStep (ABC, mock flag)
+│   │   │   ├── prompt_templates.py   #     QueryExpansionTemplate, SelfQueryTemplate
+│   │   │   ├── self_query.py         #     Author extraction via OpenAI → MongoDB lookup
+│   │   │   └── query_expansion.py    #     N query variants via OpenAI for multi-perspective search
 │   │   └── utils/                     #   split_user_full_name, batch()
 │   │
 │   ├── infrastructure/                 # External System Adapters
@@ -147,12 +162,23 @@ moodSwarm/
 
 ## 📅 Engineering Journal
 
-### 🔜 Week 4: RAG Retrieval & Inference *(Next)*
+### 🔄 Week 4: RAG Retrieval & Inference *(In Progress — Day 2/7)*
 **Objective:** Advanced retrieval with query expansion, reranking, and baseline quality metrics.
 
-- Self-query metadata extraction, query expansion, filtered vector search
-- Reranking with CrossEncoder post-retrieval optimization
-- Recall@K, MRR baselines and regression test set
+**RAG Base Layer** (`llm_engineering/application/rag/`):
+- `PromptTemplateFactory` (ABC) + `RAGStep` (ABC with `mock=True` flag for API-free testing)
+- `QueryExpansionTemplate` — LangChain `PromptTemplate` generating N alternative queries separated by `#next-question#`
+- `SelfQueryTemplate` — few-shot prompt to extract author name/ID from natural language queries
+
+**Pre-Retrieval Optimizations:**
+- `SelfQuery` — extracts author name via OpenAI `gpt-4o-mini` → `split_user_full_name()` → `UserDocument.get_or_create()` → enriches `Query.author_id` for filtered vector search
+- `QueryExpansion` — generates N diverse query reformulations via OpenAI → splits by separator → returns `list[Query]` preserving original query ID and metadata
+- Both use LangChain LCEL composition (`prompt | model`) with `ChatOpenAI(temperature=0)`
+- Both support `mock=True` mode: SelfQuery returns query unchanged, QueryExpansion returns N identical copies
+
+**Dependencies Added:** `langchain-openai ^0.1.3` (ChatOpenAI), `opik ^0.2.2` (LLM observability via `@opik.track`)
+
+**Remaining:** Reranker (CrossEncoder), ContextRetriever orchestrator, E2E test CLI, baseline metrics (Recall@K, MRR)
 
 ### ✅ Week 3: RAG Feature Pipeline & Semantic Search
 **Objective:** Transform raw text into searchable vectors in Qdrant, with end-to-end query capability.
@@ -399,6 +425,432 @@ URL: "https://medium.com/@user/my-post"
 │  payload: {content: "...", platform: "medium", ...}   │
 └───────────────────────────────────────────────────────┘
 ```
+
+---
+
+## 🧩 Architecture Deep Dive — Code-Level Flowcharts
+
+> Detailed walkthroughs of every layer with Mermaid diagrams and code snippets.
+
+### Domain Model Class Hierarchy
+
+```mermaid
+classDiagram
+    class NoSQLBaseDocument {
+        <<abstract>>
+        +UUID4 id
+        +from_mongo(data) T
+        +to_mongo() dict
+        +save() T
+        +get_or_create() T
+        +bulk_insert(docs) bool
+        +find() T
+        +bulk_find() list~T~
+    }
+
+    class VectorBaseDocument {
+        <<abstract>>
+        +UUID4 id
+        +from_record(point) T
+        +to_point() PointStruct
+        +bulk_insert(docs) bool
+        +bulk_find(limit) tuple
+        +search(query_vector) list~T~
+        +create_collection() bool
+        +group_by_class(docs) dict
+    }
+
+    class UserDocument {
+        +str first_name
+        +str last_name
+        +full_name property
+    }
+
+    class Document {
+        <<abstract>>
+        +dict content
+        +str platform
+        +UUID4 author_id
+        +str author_full_name
+    }
+
+    class PostDocument { +str image; +str link }
+    class ArticleDocument { +str link }
+    class RepositoryDocument { +str name; +str link }
+
+    class CleanedDocument {
+        <<abstract>>
+        +str content
+        +str platform
+        +UUID4 author_id
+    }
+    class CleanedPostDocument { +str image }
+    class CleanedArticleDocument { +str link }
+    class CleanedRepositoryDocument { +str name; +str link }
+
+    class Chunk {
+        <<abstract>>
+        +str content
+        +UUID4 document_id
+        +dict metadata
+    }
+    class PostChunk { +str image }
+    class ArticleChunk { +str link }
+    class RepositoryChunk { +str name; +str link }
+
+    class EmbeddedChunk {
+        <<abstract>>
+        +list~float~ embedding
+        +to_context(chunks) str
+    }
+    class EmbeddedPostChunk
+    class EmbeddedArticleChunk { +str link }
+    class EmbeddedRepositoryChunk { +str name; +str link }
+
+    class Query {
+        +str content
+        +from_str(query) Query
+        +replace_content(new) Query
+    }
+    class EmbeddedQuery { +list~float~ embedding }
+
+    NoSQLBaseDocument <|-- UserDocument
+    NoSQLBaseDocument <|-- Document
+    Document <|-- PostDocument
+    Document <|-- ArticleDocument
+    Document <|-- RepositoryDocument
+
+    VectorBaseDocument <|-- CleanedDocument
+    CleanedDocument <|-- CleanedPostDocument
+    CleanedDocument <|-- CleanedArticleDocument
+    CleanedDocument <|-- CleanedRepositoryDocument
+
+    VectorBaseDocument <|-- Chunk
+    Chunk <|-- PostChunk
+    Chunk <|-- ArticleChunk
+    Chunk <|-- RepositoryChunk
+
+    VectorBaseDocument <|-- EmbeddedChunk
+    EmbeddedChunk <|-- EmbeddedPostChunk
+    EmbeddedChunk <|-- EmbeddedArticleChunk
+    EmbeddedChunk <|-- EmbeddedRepositoryChunk
+
+    VectorBaseDocument <|-- Query
+    Query <|-- EmbeddedQuery
+```
+
+#### Data Storage Mapping
+
+| Domain Model | Storage | Collection Name | Has Vectors? |
+|---|---|---|---|
+| `UserDocument` | MongoDB | `users` | — |
+| `PostDocument` | MongoDB | `posts` | — |
+| `ArticleDocument` | MongoDB | `articles` | — |
+| `RepositoryDocument` | MongoDB | `repositories` | — |
+| `CleanedPostDocument` | Qdrant | `cleaned_posts` | ❌ payload-only |
+| `CleanedArticleDocument` | Qdrant | `cleaned_articles` | ❌ payload-only |
+| `CleanedRepositoryDocument` | Qdrant | `cleaned_repositories` | ❌ payload-only |
+| `EmbeddedPostChunk` | Qdrant | `embedded_posts` | ✅ 384-dim cosine |
+| `EmbeddedArticleChunk` | Qdrant | `embedded_articles` | ✅ 384-dim cosine |
+| `EmbeddedRepositoryChunk` | Qdrant | `embedded_repositories` | ✅ 384-dim cosine |
+| `Query` / `EmbeddedQuery` | Qdrant | `queries` | ✅ 384-dim cosine |
+
+---
+
+### Infrastructure — Singleton Database Connectors
+
+Both connectors use the **Singleton Pattern** to reuse a single client across the entire application.
+
+```mermaid
+graph LR
+    subgraph Singleton["Singleton Pattern"]
+        MC["MongoDatabaseConnector"] -->|MongoClient| MONGO[("MongoDB :27017")]
+        QC["QdrantDatabaseConnector"] -->|QdrantClient| QDRANT[("Qdrant :6333")]
+    end
+```
+
+```python
+# MongoDB (llm_engineering/infrastructure/db/mongo.py)
+class MongoDatabaseConnector:
+    _instance: MongoClient | None = None
+    def __new__(cls) -> MongoClient:
+        if cls._instance is None:
+            cls._instance = MongoClient(settings.DATABASE_HOST)
+        return cls._instance
+
+# Qdrant (llm_engineering/infrastructure/db/qdrant.py)
+class QdrantDatabaseConnector:
+    _instance: QdrantClient | None = None
+    def __new__(cls) -> QdrantClient:
+        if cls._instance is None:
+            if settings.USE_QDRANT_CLOUD:
+                cls._instance = QdrantClient(url=settings.QDRANT_CLOUD_URL, api_key=settings.QDRANT_APIKEY)
+            else:
+                cls._instance = QdrantClient(host=settings.QDRANT_DATABASE_HOST, port=settings.QDRANT_DATABASE_PORT)
+        return cls._instance
+```
+
+---
+
+### ETL Crawling — Dispatcher Routing & Extraction
+
+```mermaid
+flowchart TD
+    START["CLI: python -m tools --run-etl"] --> CONFIG["Load digital_data_etl.yaml<br/>user_full_name + links[]"]
+    CONFIG --> P["ZenML Pipeline: digital_data_etl"]
+    P --> S1["Step 1: get_or_create_user"]
+    P --> S2["Step 2: crawl_links"]
+
+    S1 --> SPLIT["split_user_full_name()<br/>'Paul Iusztin' → ('Paul', 'Iusztin')"]
+    SPLIT --> UPSERT["UserDocument.get_or_create()"]
+    UPSERT --> MONGO_USER[("MongoDB: users")]
+
+    S2 --> DISPATCH["CrawlerDispatcher.build()<br/>.register_medium()<br/>.register_github()"]
+    DISPATCH --> MATCH{URL Pattern Match?}
+    MATCH -->|"medium.com"| MEDIUM["MediumCrawler"]
+    MATCH -->|"github.com"| GITHUB["GithubCrawler"]
+    MATCH -->|"other"| CUSTOM["CustomArticleCrawler"]
+
+    MEDIUM -->|"Selenium + BeautifulSoup"| SAVE
+    GITHUB -->|"git clone + walk tree"| SAVE
+    CUSTOM -->|"AsyncHtmlLoader + Html2Text"| SAVE
+    SAVE["document.save()"] --> MONGO_DOCS[("MongoDB: articles / repositories")]
+```
+
+```python
+# Crawler Dispatcher — regex-based URL routing (application/crawlers/dispatcher.py)
+class CrawlerDispatcher:
+    def register(self, domain: str, crawler: type[BaseCrawler]) -> None:
+        parsed = urlparse(domain)
+        self._crawlers[r"https://(www\.)?{}/*".format(re.escape(parsed.netloc))] = crawler
+
+    def get_crawler(self, url: str) -> BaseCrawler:
+        for pattern, crawler in self._crawlers.items():
+            if re.match(pattern, url):
+                return crawler()
+        return CustomArticleCrawler()  # Fallback for unknown domains
+
+# MediumCrawler — Selenium headless + BeautifulSoup (application/crawlers/medium.py)
+class MediumCrawler(BaseSeleniumCrawler):
+    model = ArticleDocument
+    def extract(self, link, **kwargs):
+        self.driver.get(link)
+        self.scroll_page()
+        soup = BeautifulSoup(self.driver.page_source, "html.parser")
+        data = {"Title": ..., "Subtitle": ..., "Content": soup.get_text()}
+        self.model(content=data, platform="medium", link=link, ...).save()
+
+# GithubCrawler — git clone + file tree walk (application/crawlers/github.py)
+class GithubCrawler(BaseCrawler):
+    model = RepositoryDocument
+    def extract(self, link, **kwargs):
+        subprocess.run(["git", "clone", link], cwd=temp_dir)
+        tree = {filepath: content for filepath, content in walk_files(repo_path)}
+        self.model(content=tree, name=repo_name, platform="github", ...).save()
+```
+
+> **Deduplication:** Every crawler checks `self.model.find(link=link)` before extracting — no duplicate documents.
+
+---
+
+### Feature Engineering — Clean → Chunk → Embed
+
+#### Cleaning Pipeline (Factory + Strategy)
+
+```mermaid
+flowchart LR
+    RAW["Raw Document<br/>(MongoDB dict content)"]
+    RAW --> FACTORY["CleaningHandlerFactory"]
+    FACTORY -->|POSTS| PCH["PostCleaningHandler"]
+    FACTORY -->|ARTICLES| ACH["ArticleCleaningHandler"]
+    FACTORY -->|REPOS| RCH["RepositoryCleaningHandler"]
+    PCH & ACH & RCH --> CLEAN_OP["clean_text()<br/>regex: strip special chars,<br/>collapse whitespace"]
+    CLEAN_OP --> CLEANED["CleanedDocument<br/>(Qdrant payload-only)"]
+```
+
+```python
+# Cleaning Operation (application/preprocessing/operations/cleaning.py)
+def clean_text(text: str) -> str:
+    text = re.sub(r"[^\w\s.,!?]", " ", text)   # Strip special characters
+    text = re.sub(r"\s+", " ", text)             # Collapse whitespace
+    return text.strip()
+
+# Factory creates the right handler per DataCategory
+class CleaningDispatcher:
+    @classmethod
+    def dispatch(cls, data_model: NoSQLBaseDocument) -> VectorBaseDocument:
+        data_category = DataCategory(data_model.get_collection_name())
+        handler = cls.factory.create_handler(data_category)
+        return handler.clean(data_model)
+```
+
+#### Chunking Pipeline (Two-Stage Strategy)
+
+```mermaid
+flowchart TD
+    CLEANED["CleanedDocument"] --> CFACTORY["ChunkingHandlerFactory"]
+    CFACTORY -->|POSTS| PC["PostChunkingHandler<br/>size=250, overlap=25"]
+    CFACTORY -->|ARTICLES| AC["ArticleChunkingHandler<br/>min=1000, max=2000"]
+    CFACTORY -->|REPOS| RC["RepositoryChunkingHandler<br/>size=1500, overlap=100"]
+
+    PC & RC --> CT["chunk_text()"]
+    AC --> CA["chunk_article()"]
+
+    subgraph TwoStage["Two-Stage Chunking"]
+        CT --> S1C["Stage 1: RecursiveCharacterTextSplitter<br/>Split by paragraph breaks"]
+        S1C --> S2C["Stage 2: SentenceTransformersTokenTextSplitter<br/>Cap at model max_seq_length"]
+
+        CA --> S1A["Stage 1: Regex sentence splitting<br/>Accumulate to min/max length"]
+        S1A --> S2A["Stage 2: SentenceTransformersTokenTextSplitter<br/>Cap at model max_seq_length"]
+    end
+
+    S2C & S2A --> CHUNKS["Chunk models<br/>(id = MD5 hash of content)"]
+```
+
+```python
+# Posts/Repos chunking (application/preprocessing/operations/chunking.py)
+def chunk_text(text, chunk_size=500, chunk_overlap=50):
+    # Stage 1: character-level splitting by paragraph
+    character_splitter = RecursiveCharacterTextSplitter(
+        separators=["\n\n"], chunk_size=chunk_size, chunk_overlap=0)
+    text_split = character_splitter.split_text(text)
+
+    # Stage 2: token-level capping at embedding model's max
+    token_splitter = SentenceTransformersTokenTextSplitter(
+        chunk_overlap=chunk_overlap,
+        tokens_per_chunk=embedding_model.max_input_length,
+        model_name=embedding_model.model_id)
+    return [chunk for section in text_split for chunk in token_splitter.split_text(section)]
+
+# Articles chunking — sentence-aware with min/max bounds
+def chunk_article(text, min_length, max_length):
+    sentences = re.split(r"(?<!\w\.\w.)(?<![A-Z][a-z]\.)(<=\.|\?|\!)\s", text)
+    extracts = []  # accumulate sentences until max_length, flush at min_length
+    # ... then Stage 2: SentenceTransformersTokenTextSplitter caps each extract
+```
+
+> **Deterministic IDs:** `UUID(hashlib.md5(chunk.encode()).hexdigest(), version=4)` — identical content always gets the same ID (dedup via upsert).
+
+#### Embedding Pipeline
+
+```mermaid
+flowchart LR
+    CHUNKS["Chunk[]"] --> EDFACTORY["EmbeddingHandlerFactory"]
+    EDFACTORY -->|POSTS| PEH["PostEmbeddingHandler"]
+    EDFACTORY -->|ARTICLES| AEH["ArticleEmbeddingHandler"]
+    EDFACTORY -->|REPOS| REH["RepositoryEmbeddingHandler"]
+    EDFACTORY -->|QUERIES| QEH["QueryEmbeddingHandler"]
+
+    PEH & AEH & REH & QEH --> MODEL["EmbeddingModelSingleton<br/>all-MiniLM-L6-v2"]
+    MODEL --> EMBED["model.encode(batch_texts)"]
+    EMBED --> EMBEDDED["EmbeddedChunk[]<br/>(content + 384-dim vector)"]
+```
+
+```python
+# Singleton embedding model (application/networks/embeddings.py)
+class EmbeddingModelSingleton(metaclass=SingletonMeta):
+    def __init__(self, model_id=settings.TEXT_EMBEDDING_MODEL_ID):
+        self._model = SentenceTransformer(model_id, device=settings.RAG_MODEL_DEVICE)
+        self._model.eval()
+
+    def __call__(self, input_text, to_list=True):
+        embeddings = self._model.encode(input_text)
+        return embeddings.tolist() if to_list else embeddings
+
+    @cached_property
+    def embedding_size(self) -> int:
+        return self._model.encode("").shape[0]  # 384
+
+# Cross-Encoder for reranking (loaded, not yet wired into retrieval)
+class CrossEncoderModelSingleton(metaclass=SingletonMeta):
+    def __init__(self, model_id=settings.RERANKING_CROSS_ENCODER_MODEL_ID):
+        self._model = CrossEncoder(model_name=model_id, device=settings.RAG_MODEL_DEVICE)
+    def __call__(self, pairs: list[tuple[str, str]]) -> list[float]:
+        return self._model.predict(pairs).tolist()
+```
+
+---
+
+### RAG Retrieval Pipeline — SelfQuery + QueryExpansion
+
+```mermaid
+flowchart TD
+    Q_INPUT["User Query String"]
+    Q_INPUT --> SELF_QUERY["SelfQuery<br/>(LLM extracts author name)"]
+    SELF_QUERY -->|"name found"| ANNOTATED["Query with author_id set"]
+    SELF_QUERY -->|"'none' returned"| PLAIN["Query without filter"]
+
+    ANNOTATED & PLAIN --> EXPANSION["QueryExpansion<br/>(LLM generates N variants)"]
+    EXPANSION --> Q_LIST["list of Query — original + expansions"]
+
+    Q_LIST --> EMBED_Q["EmbeddingDispatcher<br/>embed each query"]
+    EMBED_Q --> SEARCH["VectorBaseDocument.search()<br/>cosine similarity in Qdrant"]
+    SEARCH --> RESULTS["Retrieved EmbeddedChunks"]
+    RESULTS --> CONTEXT["EmbeddedChunk.to_context()<br/>format as numbered text"]
+```
+
+```python
+# SelfQuery — extract author name from natural language (application/rag/self_query.py)
+class SelfQuery(RAGStep):
+    def generate(self, query: Query) -> Query:
+        prompt = SelfQueryTemplate().create_template()
+        model = ChatOpenAI(model=settings.OPENAI_MODEL_ID, temperature=0)
+        chain = prompt | model
+        response = chain.invoke({"question": query.content})
+        user_full_name = response.content.strip()
+        if user_full_name == "none":
+            return query  # No author filtering
+        user = UserDocument.get_or_create(first_name=..., last_name=...)
+        query.author_id = user.id
+        return query
+
+# QueryExpansion — generate N alternative query phrasings (application/rag/query_expansion.py)
+class QueryExpansion(RAGStep):
+    def generate(self, query: Query, expand_to_n: int) -> list[Query]:
+        prompt = QueryExpansionTemplate().create_template(expand_to_n - 1)
+        model = ChatOpenAI(model=settings.OPENAI_MODEL_ID, temperature=0)
+        chain = prompt | model
+        response = chain.invoke({"question": query.content})
+        queries_content = result.strip().split("#next-question#")
+        return [query] + [query.replace_content(c.strip()) for c in queries_content]
+```
+
+---
+
+### Complete End-to-End Data Flow
+
+```mermaid
+flowchart TD
+    A["1. Crawl<br/>Web → Raw Documents<br/>(dict content)"] -->|"MongoDB"| B["2. Query Warehouse<br/>Fetch by author"]
+    B --> C["3. Clean<br/>Regex sanitization<br/>dict → single string"]
+    C -->|"Qdrant (no vectors)"| D["4a. Store Cleaned Docs"]
+    C --> E["4b. Chunk<br/>Two-stage splitting"]
+    E --> F["5. Embed<br/>all-MiniLM-L6-v2<br/>384-dim vectors"]
+    F -->|"Qdrant (cosine)"| G["6. Store Embedded Chunks"]
+    G --> H["7. RAG Query<br/>SelfQuery → Expand →<br/>Embed → Search"]
+    H --> I["8. Retrieved Context<br/>Top-K chunks for LLM"]
+
+    style A fill:#e1f5fe
+    style C fill:#fff3e0
+    style E fill:#fff3e0
+    style F fill:#e8f5e9
+    style G fill:#e8f5e9
+    style H fill:#f3e5f5
+```
+
+---
+
+### Design Patterns Summary
+
+| Pattern | Where Used | Purpose |
+|---|---|---|
+| **Singleton** | `MongoDatabaseConnector`, `QdrantDatabaseConnector`, `EmbeddingModelSingleton`, `CrossEncoderModelSingleton` | One instance per process |
+| **Factory** | `CleaningHandlerFactory`, `ChunkingHandlerFactory`, `EmbeddingHandlerFactory` | Create handler by `DataCategory` |
+| **Strategy** | All `*DataHandler` classes (cleaning, chunking, embedding) | Interchangeable processing per content type |
+| **Dispatcher** | `CrawlerDispatcher`, `CleaningDispatcher`, `ChunkingDispatcher`, `EmbeddingDispatcher` | Route data to correct handler |
+| **Template Method** | `BaseCrawler.extract()`, `RAGStep.generate()` | Abstract method in base, concrete in subclasses |
+| **Active Record** | `NoSQLBaseDocument.save()`, `VectorBaseDocument.bulk_insert()` | Domain objects manage own persistence |
+| **Builder** | `CrawlerDispatcher.build().register_medium().register_github()` | Fluent chaining for setup |
 
 ---
 
