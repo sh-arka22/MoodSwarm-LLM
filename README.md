@@ -11,7 +11,7 @@
 | 1 | Infrastructure & Environment Setup | Done |
 | 2 | Digital Data ETL Pipeline | Done |
 | 3 | RAG Feature Pipeline & Semantic Search | Done |
-| 4 | RAG Retrieval & Inference | In Progress |
+| 4 | RAG Retrieval & Inference | Done |
 | 5 | Instruction Dataset & SFT Training | Pending |
 | 6 | DPO Preference Alignment & Evaluation | Pending |
 | 7 | Inference Optimization & Deployment | Pending |
@@ -148,7 +148,10 @@ moodSwarm/
 │   ├── data_warehouse.py              #   MongoDB export/import (JSON backup/restore)
 │   ├── qdrant_inspect.py             #   Qdrant CLI (list-collections, stats, sample, semantic search)
 │   ├── chunk_analysis.py             #   Chunk validation (token distribution stats + PASS/FAIL limit check)
-│   └── search_test.py               #   End-to-end semantic search across all embedded collections
+│   ├── search_test.py               #   End-to-end semantic search across all embedded collections
+│   ├── rag.py                        #   Full RAG retrieval CLI (--query, --k, --mock)
+│   ├── rag_tuning.py                #   Stage latency, parameter sweep, edge cases
+│   └── rag_eval.py                  #   Recall@K + MRR evaluation on curated test set
 │
 ├── interview/
 │   └── INTERVIEW_QUESTIONS.md         #   41 interview Q&A derived from this codebase
@@ -191,6 +194,20 @@ moodSwarm/
 - Author-filtered vector search via Qdrant `FieldCondition(key="author_id", match=...)`
 - Deduplication via `set()` (leverages `__eq__`/`__hash__` on UUID `id`)
 - `Reranker` → cross-encoder re-ranking → final top-K results
+
+**Tooling:**
+- `tools/rag.py` — full RAG retrieval CLI (`--query`, `--k`, `--expand-to-n`, `--mock`)
+- `tools/rag_tuning.py` — stage latency profiling, parameter sweep (k x expand_to_n), edge case tests
+- `tools/rag_eval.py` — Recall@K + MRR evaluation on 7 curated query→expected-chunk test cases
+
+**Baseline Metrics:**
+| Metric | K=3 | K=6 |
+|--------|-----|-----|
+| Mean Recall@K | 0.429 | 0.595 |
+| MRR | 1.000 | 0.857 |
+| Avg Latency | 2567ms | 2472ms |
+
+**Latency Profile:** OpenAI calls dominate (~3.2s combined for SelfQuery + QueryExpansion), Qdrant search ~16ms, CrossEncoder reranking ~276ms. Optimal defaults: `k=3`, `expand_to_n=3`.
 
 **Dependencies Added:** `langchain-openai ^0.1.3` (ChatOpenAI), `opik ^0.2.2` (LLM observability via `@opik.track`)
 
@@ -937,7 +954,26 @@ poetry run python -m tools.chunk_analysis
 poetry run python -m tools.chunk_analysis --collection embedded_articles
 ```
 
-### 5. Data Backup/Restore
+### 5. RAG Retrieval Pipeline
+```bash
+# Full RAG retrieval (SelfQuery → QueryExpansion → Search → Rerank)
+poetry run python -m tools.rag -q "How do RAG systems work?" --k 3
+
+# With author-filtered search
+poetry run python -m tools.rag -q "My name is Arkajyoti Saha. Write about LLMs." --k 9
+
+# Mock mode (no OpenAI API calls)
+poetry run python -m tools.rag -q "What are best practices?" --mock
+
+# Parameter tuning suite
+poetry run python -m tools.rag_tuning
+
+# Evaluation baselines (Recall@K + MRR)
+poetry run python -m tools.rag_eval --k 3
+poetry run python -m tools.rag_eval --k 6
+```
+
+### 6. Data Backup/Restore
 ```bash
 # Export MongoDB → JSON
 poetry run python -m tools.data_warehouse --export-raw-data
@@ -946,7 +982,7 @@ poetry run python -m tools.data_warehouse --export-raw-data
 poetry run python -m tools.data_warehouse --import-raw-data
 ```
 
-### 6. Monitoring
+### 7. Monitoring
 ```bash
 poetry run zenml login --local
 ```
