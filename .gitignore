@@ -68,5 +68,8 @@ CLAUDE.md
 # Memory (Claude session tracking)
 memory/
 
+# Reference material
+LLM-Engineering-Book/
+
 # Logs
 *.log

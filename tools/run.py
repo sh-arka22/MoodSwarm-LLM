@@ -7,7 +7,7 @@ from loguru import logger
 
 @click.command(
     help="""
-MoodSwarm LLM Engineering CLI v0.1.0.
+MoodSwarm LLM Engineering CLI v0.2.0.
 
 Main entry point for pipeline execution.
 """
@@ -21,16 +21,34 @@ Main entry point for pipeline execution.
     help="Filename of the ETL config file.",
 )
 @click.option("--run-feature-engineering", is_flag=True, default=False, help="Run the feature engineering pipeline.")
+@click.option(
+    "--run-generate-instruct-datasets",
+    is_flag=True,
+    default=False,
+    help="Run the instruction dataset generation pipeline.",
+)
+@click.option(
+    "--run-generate-preference-datasets",
+    is_flag=True,
+    default=False,
+    help="Run the preference dataset generation pipeline.",
+)
 def main(
     no_cache: bool = False,
     run_smoke_test: bool = False,
     run_etl: bool = False,
     etl_config_filename: str = "digital_data_etl.yaml",
     run_feature_engineering: bool = False,
+    run_generate_instruct_datasets: bool = False,
+    run_generate_preference_datasets: bool = False,
 ) -> None:
     assert (
-        run_smoke_test or run_etl or run_feature_engineering
-    ), "Please specify an action to run. Available: --run-smoke-test, --run-etl, --run-feature-engineering"
+        run_smoke_test
+        or run_etl
+        or run_feature_engineering
+        or run_generate_instruct_datasets
+        or run_generate_preference_datasets
+    ), "Please specify an action to run. Available: --run-smoke-test, --run-etl, --run-feature-engineering, --run-generate-instruct-datasets, --run-generate-preference-datasets"
 
     pipeline_args = {
         "enable_cache": not no_cache,
@@ -61,6 +79,24 @@ def main(
         pipeline_args["run_name"] = f"feature_engineering_run_{dt.now().strftime('%Y_%m_%d_%H_%M_%S')}"
         logger.info("Running feature engineering pipeline...")
         feature_engineering.with_options(**pipeline_args)()
+
+    if run_generate_instruct_datasets:
+        from pipelines.generate_datasets import generate_datasets
+
+        pipeline_args["config_path"] = root_dir / "configs" / "generate_instruct_datasets.yaml"
+        assert pipeline_args["config_path"].exists(), f"Config file not found: {pipeline_args['config_path']}"
+        pipeline_args["run_name"] = f"generate_instruct_datasets_run_{dt.now().strftime('%Y_%m_%d_%H_%M_%S')}"
+        logger.info("Running instruction dataset generation pipeline...")
+        generate_datasets.with_options(**pipeline_args)()
+
+    if run_generate_preference_datasets:
+        from pipelines.generate_datasets import generate_datasets
+
+        pipeline_args["config_path"] = root_dir / "configs" / "generate_preference_datasets.yaml"
+        assert pipeline_args["config_path"].exists(), f"Config file not found: {pipeline_args['config_path']}"
+        pipeline_args["run_name"] = f"generate_preference_datasets_run_{dt.now().strftime('%Y_%m_%d_%H_%M_%S')}"
+        logger.info("Running preference dataset generation pipeline...")
+        generate_datasets.with_options(**pipeline_args)()
 
 
 if __name__ == "__main__":

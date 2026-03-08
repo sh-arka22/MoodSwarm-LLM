@@ -71,3 +71,7 @@ import-data-warehouse = "poetry run python -m tools.data_warehouse --import-raw-
 
 # Feature engineering (Week 3)
 run-feature-engineering = "poetry run python -m tools.run --run-feature-engineering --no-cache"
+
+# Dataset generation (Week 5)
+run-generate-instruct-datasets = "poetry run python -m tools.run --run-generate-instruct-datasets --no-cache"
+run-generate-preference-datasets = "poetry run python -m tools.run --run-generate-preference-datasets --no-cache"
