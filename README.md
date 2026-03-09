@@ -2,8 +2,6 @@
 
 > Build an end-to-end AI system that mimics a specific persona's writing style and knowledge using the **FTI (Feature, Training, Inference) Architecture**.
 
-![MoodSwarm Architecture](moodswarm.png)
-
 ### Progress
 
 | Week | Phase | Status |
