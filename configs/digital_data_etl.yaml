@@ -1,7 +1,14 @@
 parameters:
-  user_full_name: Paul Iusztin
+  user_full_name: Arkajyoti Saha
   links:
-    # Substack articles (free, no paywall)
+    # Existing articles
     - https://decodingml.substack.com/p/an-end-to-end-framework-for-production?r=1ttoeh
     - https://decodingml.substack.com/p/the-llm-twin-free-course-on-production?r=1ttoeh
     - https://decodingml.substack.com/p/a-blueprint-for-designing-production?r=1ttoeh
+    # Your articles (add URLs here)
+    - https://your-blog.com/your-article-1
+    - https://medium.com/@yourusername/your-article-2
+    - https://github.com/sh-arka22/some-repo
+    - https://github.com/sh-arka22/Derivative-pricing-in-C-
+    - https://github.com/sh-arka22/QUANTEDGE-ML-Enhanced-Derivatives-Hedging-Platform
+    

@@ -7,7 +7,7 @@ from loguru import logger
 
 @click.command(
     help="""
-MoodSwarm LLM Engineering CLI v0.2.0.
+MoodSwarm LLM Engineering CLI v0.3.0.
 
 Main entry point for pipeline execution.
 """
@@ -33,6 +33,8 @@ Main entry point for pipeline execution.
     default=False,
     help="Run the preference dataset generation pipeline.",
 )
+@click.option("--run-training", is_flag=True, default=False, help="Run the training pipeline (SageMaker).")
+@click.option("--run-evaluation", is_flag=True, default=False, help="Run the evaluation pipeline (SageMaker).")
 def main(
     no_cache: bool = False,
     run_smoke_test: bool = False,
@@ -41,6 +43,8 @@ def main(
     run_feature_engineering: bool = False,
     run_generate_instruct_datasets: bool = False,
     run_generate_preference_datasets: bool = False,
+    run_training: bool = False,
+    run_evaluation: bool = False,
 ) -> None:
     assert (
         run_smoke_test
@@ -48,7 +52,13 @@ def main(
         or run_feature_engineering
         or run_generate_instruct_datasets
         or run_generate_preference_datasets
-    ), "Please specify an action to run. Available: --run-smoke-test, --run-etl, --run-feature-engineering, --run-generate-instruct-datasets, --run-generate-preference-datasets"
+        or run_training
+        or run_evaluation
+    ), (
+        "Please specify an action to run. Available: --run-smoke-test, --run-etl, "
+        "--run-feature-engineering, --run-generate-instruct-datasets, "
+        "--run-generate-preference-datasets, --run-training, --run-evaluation"
+    )
 
     pipeline_args = {
         "enable_cache": not no_cache,
@@ -97,6 +107,24 @@ def main(
         pipeline_args["run_name"] = f"generate_preference_datasets_run_{dt.now().strftime('%Y_%m_%d_%H_%M_%S')}"
         logger.info("Running preference dataset generation pipeline...")
         generate_datasets.with_options(**pipeline_args)()
+
+    if run_training:
+        from pipelines.training import training
+
+        pipeline_args["config_path"] = root_dir / "configs" / "training.yaml"
+        assert pipeline_args["config_path"].exists(), f"Config file not found: {pipeline_args['config_path']}"
+        pipeline_args["run_name"] = f"training_run_{dt.now().strftime('%Y_%m_%d_%H_%M_%S')}"
+        logger.info("Running training pipeline (SageMaker)...")
+        training.with_options(**pipeline_args)()
+
+    if run_evaluation:
+        from pipelines.evaluating import evaluating
+
+        pipeline_args["config_path"] = root_dir / "configs" / "evaluating.yaml"
+        assert pipeline_args["config_path"].exists(), f"Config file not found: {pipeline_args['config_path']}"
+        pipeline_args["run_name"] = f"evaluation_run_{dt.now().strftime('%Y_%m_%d_%H_%M_%S')}"
+        logger.info("Running evaluation pipeline (SageMaker)...")
+        evaluating.with_options(**pipeline_args)()
 
 
 if __name__ == "__main__":

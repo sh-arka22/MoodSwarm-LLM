@@ -1,6 +1,6 @@
 parameters:
   test_split_size: 0.1
   dataset_type: "instruction"
-  push_to_huggingface: false
-  dataset_id: null
+  push_to_huggingface: true
+  dataset_id: "saha2026/llmtwin"
   mock: false

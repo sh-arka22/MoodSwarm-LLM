@@ -10,7 +10,7 @@
 | 2 | Digital Data ETL Pipeline | Done |
 | 3 | RAG Feature Pipeline & Semantic Search | Done |
 | 4 | RAG Retrieval & Inference | Done |
-| 5 | Instruction Dataset & SFT Training | Pending |
+| 5 | Instruction Dataset & SFT Training | Done |
 | 6 | DPO Preference Alignment & Evaluation | Pending |
 | 7 | Inference Optimization & Deployment | Pending |
 | 8 | MLOps, Monitoring & Capstone | Pending |
@@ -74,6 +74,9 @@ graph LR
 | Language | **Python 3.11 + Poetry** | Reproducible dependency management |
 | Containers | **Docker Compose** | Local MongoDB + Qdrant infrastructure |
 | RAG LLM | **OpenAI gpt-4o-mini** | Query expansion, self-query, evaluation (via LangChain) |
+| Fine-Tuning | **Unsloth + QLoRA** | Memory-efficient 4-bit Llama 3.1 8B fine-tuning |
+| Training Infra | **AWS SageMaker** | Managed GPU training on `ml.g5.2xlarge` (NVIDIA A10G 24GB) |
+| Experiment Tracking | **Comet ML** | Hyperparameter logging, loss curves, model registry |
 | Observability | **Opik (Comet ML)** | LLM call tracing with `@opik.track` decorator |
 | Architecture | **DDD** | Domain-Driven Design with layered separation |
 
@@ -119,7 +122,11 @@ moodSwarm/
 │   │       ├── mongo.py               #   MongoDatabaseConnector (Singleton)
 │   │       └── qdrant.py              #   QdrantDatabaseConnector (Singleton)
 │   │
-│   ├── model/                          # ML Model Code (future: SFT, DPO)
+│   ├── model/                          # ML Model Code
+│   │   └── finetuning/
+│   │       ├── finetune.py            #   SFT/DPO entry point (Unsloth QLoRA, Alpaca format)
+│   │       ├── sagemaker_launcher.py  #   SageMaker HuggingFace estimator launcher
+│   │       └── requirements.txt       #   GPU-specific deps (torch, unsloth, transformers)
 │   └── settings.py                     # Pydantic Settings (.env loader)
 │
 ├── pipelines/                          # ZenML Pipeline Definitions
@@ -165,6 +172,123 @@ moodSwarm/
 ---
 
 ## 📅 Engineering Journal
+
+### ✅ Week 5: SFT Fine-Tuning on AWS SageMaker
+**Objective:** Fine-tune Meta Llama 3.1 8B using Supervised Fine-Tuning (SFT) with QLoRA on AWS SageMaker, producing a persona-aware writing assistant (TwinLlama).
+
+#### Training Pipeline Architecture
+```mermaid
+flowchart LR
+    LOCAL["Local Machine"] -->|"sagemaker_launcher.py"| SM["AWS SageMaker\nml.g5.2xlarge"]
+    SM -->|"pip install\nrequirements.txt"| ENV["GPU Environment\nPyTorch 2.4 + CUDA"]
+    ENV -->|"finetune.py"| UNSLOTH["Unsloth\nFastLanguageModel"]
+    UNSLOTH -->|"QLoRA 4-bit"| LLAMA["Meta-Llama-3.1-8B"]
+    LLAMA -->|"SFTTrainer"| TRAINED["TwinLlama-3.1-8B"]
+    TRAINED -->|"push_to_hub"| HF["🤗 Hugging Face Hub\nsaha2026/TwinLlama-3.1-8B"]
+    SM -->|"metrics"| COMET["☄️ Comet ML\nLoss curves + config"]
+```
+
+#### Model & LoRA Configuration
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| Base Model | `unsloth/Meta-Llama-3.1-8B` | Unsloth-optimized Llama 3.1 with pre-quantized weights |
+| Architecture | `LlamaForCausalLM` | 32-layer decoder-only transformer |
+| Hidden Size | 4096 | 32 attention heads, 8 KV heads (GQA) |
+| Intermediate Size | 14,336 | SwiGLU activation (`silu`) |
+| Vocab Size | 128,256 | Llama 3.1 extended vocabulary |
+| Max Position Embeddings | 131,072 | RoPE with Llama3-style scaling (factor=8.0) |
+| Quantization | 4-bit (QLoRA) | Memory-efficient training on 24GB VRAM |
+| LoRA Rank (r) | 32 | Low-rank adaptation dimension |
+| LoRA Alpha | 32 | Scaling factor (alpha/r = 1.0) |
+| LoRA Dropout | 0.0 | No dropout for maximum signal |
+| Target Modules | `q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj` | All attention + MLP projections (7 modules) |
+| PEFT Type | `LORA` | Parameter-Efficient Fine-Tuning via LoRA |
+| Precision | `bfloat16` | Native A10G support for mixed-precision training |
+
+#### Training Hyperparameters
+| Parameter | Value |
+|-----------|-------|
+| Epochs | 3 |
+| Batch Size | 2 per device |
+| Gradient Accumulation | 8 steps (effective batch = 16) |
+| Learning Rate | 3e-4 |
+| LR Schedule | Linear decay |
+| Warmup Steps | 10 |
+| Optimizer | `adamw_8bit` (memory-efficient) |
+| Weight Decay | 0.01 |
+| Max Sequence Length | 2,048 tokens |
+| Packing | Enabled (multiple samples per sequence) |
+| Logging | Every step → Comet ML |
+
+#### Dataset Composition
+| Dataset | Source | Samples | Purpose |
+|---------|--------|---------|---------|
+| `saha2026/llmtwin` | Custom instruction dataset | ~200 | Persona-specific writing samples generated from RAG context |
+| `mlabonne/FineTome-Alpaca-100k` | Community Alpaca subset | 10,000 | General instruction-following capability |
+| **Combined** | Concatenated + shuffled | ~10,200 | 95/5 train/test split |
+
+All samples are formatted in **Alpaca template**:
+```
+Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+### Instruction:
+{instruction}
+
+### Response:
+{output}<|EOS|>
+```
+
+#### Training Results
+| Metric | Value |
+|--------|-------|
+| Training Status | ✅ `SUCCESS` |
+| Training Time | 1,083 seconds (~18 minutes) |
+| Instance Type | `ml.g5.2xlarge` (NVIDIA A10G 24GB) |
+| Transformers Version | 4.45.2 |
+| Unsloth Version | 2024.9.post2 |
+| Output Model | `saha2026/TwinLlama-3.1-8B` (pushed to Hugging Face Hub) |
+| Experiment Tracking | Comet ML (full loss curves, config, source code uploaded) |
+
+#### SageMaker Infrastructure
+- **Entry Point:** `finetune.py` — Unsloth QLoRA training script (SFT + DPO modes)
+- **Launcher:** `sagemaker_launcher.py` — configures `HuggingFace` estimator with hyperparameters, requirements, and environment variables
+- **Instance:** `ml.g5.2xlarge` — 1× NVIDIA A10G (24GB VRAM), 8 vCPUs, 32GB RAM
+- **Base Image:** HuggingFace PyTorch 2.1 (py310), overridden by `requirements.txt` to PyTorch 2.4.0
+- **Environment Variables:** `HUGGING_FACE_HUB_TOKEN`, `COMET_API_KEY`, `COMET_PROJECT_NAME`
+
+#### Key Dependencies (requirements.txt)
+```
+accelerate==0.34.1      # HF training acceleration
+torch==2.4.0            # PyTorch with CUDA support
+transformers==4.45.2    # HF Transformers (supports Llama 3.1 tokenizer format)
+unsloth==2024.9.post2   # Memory-efficient QLoRA fine-tuning
+peft==0.12.0            # Parameter-Efficient Fine-Tuning
+trl==0.9.6              # SFT/DPO trainers
+bitsandbytes==0.43.3    # 4-bit quantization
+comet-ml==3.44.3        # Experiment tracking
+```
+
+#### Dependency Resolution Challenges
+Getting the right combination of Unsloth, Transformers, and PyTorch versions to work together on SageMaker required resolving several cascading compatibility issues:
+
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| `ResourceLimitExceeded` | Zero quota for `ml.g5.2xlarge` | AWS Service Quotas increase request |
+| `torchvision` mismatch | PyTorch 2.4.0 requires `torchvision>=0.19.0` | Pinned `torchvision==0.19.0` |
+| `torch._inductor.config` crash | Unsloth HEAD imports `torchao` → needs PyTorch 2.6 | Reverted to `unsloth==2024.9.post2` |
+| `ModelWrapper` safetensors error | `transformers==4.43.3` uses `tokenizers<0.20` which can't parse Llama 3.1 tokenizer | Upgraded to `transformers==4.45.2` |
+| `PreTrainedConfig` NameError | API rename in newer Transformers breaks some Unsloth versions | Pinned to `transformers==4.45.2` (stable boundary) |
+| Model not recognized by Unsloth | Hardcoded `meta-llama/Llama-3.1-8B` | Changed to `unsloth/Meta-Llama-3.1-8B` |
+
+#### Comet ML Integration
+All training metrics are automatically logged to Comet ML:
+- **Hyperparameters:** Learning rate, batch size, epochs, LoRA config, model architecture
+- **Training Curves:** Per-step loss, learning rate schedule
+- **Model Config:** Full `LlamaConfig` with RoPE scaling, GQA heads, vocab size
+- **Artifacts:** Conda environment, installed packages, source code, model graph
+- **PEFT Config:** LoRA rank, alpha, target modules, dropout
+
+---
 
 ### ✅ Week 4: RAG Retrieval & Inference
 **Objective:** Advanced retrieval with query expansion, reranking, and a fully orchestrated retrieval pipeline.
@@ -980,7 +1104,18 @@ poetry run python -m tools.data_warehouse --export-raw-data
 poetry run python -m tools.data_warehouse --import-raw-data
 ```
 
-### 7. Monitoring
+### 7. Fine-Tune LLM on SageMaker
+```bash
+# Launch SFT fine-tuning on AWS SageMaker (requires AWS credentials in .env)
+poetry run python -m llm_engineering.model.finetuning.sagemaker_launcher
+
+# The job runs remotely on ml.g5.2xlarge — monitor via:
+# - Terminal output (streams CloudWatch logs)
+# - Comet ML dashboard (real-time loss curves)
+# - AWS SageMaker Console (job status)
+```
+
+### 8. Monitoring
 ```bash
 poetry run zenml login --local
 ```

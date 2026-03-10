@@ -40,6 +40,10 @@ class Settings(BaseSettings):
 
     # --- Optional settings used to tweak the code. ---
 
+    # LLM model
+    HF_MODEL_ID: str = "mlabonne/TwinLlama-3.1-8B-DPO"
+    GPU_INSTANCE_TYPE: str = "ml.g5.2xlarge"
+
     # RAG
     TEXT_EMBEDDING_MODEL_ID: str = "sentence-transformers/all-MiniLM-L6-v2"
     RERANKING_CROSS_ENCODER_MODEL_ID: str = "cross-encoder/ms-marco-MiniLM-L-4-v2"
