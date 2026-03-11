@@ -238,16 +238,29 @@ Below is an instruction that describes a task. Write a response that appropriate
 {output}<|EOS|>
 ```
 
-#### Training Results
+#### Training Results (Full Run)
 | Metric | Value |
 |--------|-------|
-| Training Status | ✅ `SUCCESS` |
-| Training Time | 1,083 seconds (~18 minutes) |
+| Training Status | ✅ `SUCCESS` (exit code 0) |
+| Dataset | 10,638 samples (638 `saha2026/llmtwin` + 10K `mlabonne/FineTome-Alpaca-100k`) |
+| Training Steps | 399 steps, 3 epochs |
+| Final Train Loss | **0.6494** |
+| Loss Trajectory | 1.12 → 0.65 → 0.49 (epoch 1 → 2 → 3) |
+| Training Time | 12,866 seconds (~3h 14m) |
+| Billable Cost | ~$4.50 (ml.g5.2xlarge @ $1.515/hr) |
+| Train Samples/sec | 0.549 |
 | Instance Type | `ml.g5.2xlarge` (NVIDIA A10G 24GB) |
-| Transformers Version | 4.45.2 |
-| Unsloth Version | 2024.9.post2 |
-| Output Model | `saha2026/TwinLlama-3.1-8B` (pushed to Hugging Face Hub) |
+| Output Model | [`saha2026/TwinLlama-3.1-8B`](https://huggingface.co/saha2026/TwinLlama-3.1-8B) (merged 16-bit, pushed to HF Hub) |
 | Experiment Tracking | Comet ML (full loss curves, config, source code uploaded) |
+
+#### Dummy Run (Validation)
+| Metric | Value |
+|--------|-------|
+| Dataset | 400 samples (subset) |
+| Steps | 1 step, 1 epoch |
+| Loss | 1.7142 |
+| Training Time | 1,083 seconds (~18 minutes) |
+| Purpose | Validate SageMaker pipeline end-to-end before full run |
 
 #### SageMaker Infrastructure
 - **Entry Point:** `finetune.py` — Unsloth QLoRA training script (SFT + DPO modes)

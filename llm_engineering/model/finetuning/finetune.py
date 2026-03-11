@@ -88,7 +88,7 @@ def finetune(
     per_device_train_batch_size: int = 2,
     gradient_accumulation_steps: int = 8,
     beta: float = 0.5,
-    is_dummy: bool = True,
+    is_dummy: bool = False,
 ) -> tuple:
     model, tokenizer = load_model(
         model_name, max_seq_length, load_in_4bit,
@@ -324,6 +324,7 @@ if __name__ == "__main__":
             num_train_epochs=args.num_train_epochs,
             per_device_train_batch_size=args.per_device_train_batch_size,
             learning_rate=args.learning_rate,
+            is_dummy=args.is_dummy,
         )
         sft_output_model_repo_id = (
             f"{args.model_output_huggingface_workspace}/TwinLlama-3.1-8B"
