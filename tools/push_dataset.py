@@ -20,7 +20,7 @@ def load_samples(dataset_path: Path) -> list[dict]:
         return json.load(f)
 
 
-def samples_to_hf_dataset(samples: list[dict]) -> DatasetDict:
+def samples_to_hf_dataset(samples: list[dict], dataset_type: str = "instruct") -> DatasetDict:
     train_samples = [s for s in samples if s.get("split", "train") == "train"]
     test_samples = [s for s in samples if s.get("split") == "test"]
 
@@ -31,6 +31,12 @@ def samples_to_hf_dataset(samples: list[dict]) -> DatasetDict:
         )
 
     def to_hf(samples_list: list[dict]) -> Dataset:
+        if dataset_type == "preference":
+            return Dataset.from_dict({
+                "prompt": [s["instruction"] for s in samples_list],
+                "chosen": [s["chosen"] for s in samples_list],
+                "rejected": [s["rejected"] for s in samples_list],
+            })
         return Dataset.from_dict({
             "instruction": [s["instruction"] for s in samples_list],
             "output": [s["answer"] for s in samples_list],
@@ -45,13 +51,14 @@ def samples_to_hf_dataset(samples: list[dict]) -> DatasetDict:
 @click.command(help="Push a dataset to HuggingFace Hub.")
 @click.option("--dataset-path", required=True, type=click.Path(exists=True), help="Path to JSON dataset file.")
 @click.option("--dataset-id", required=True, help="HuggingFace dataset ID (e.g., 'username/llmtwin').")
+@click.option("--dataset-type", default="instruct", type=click.Choice(["instruct", "preference"]), help="Dataset type.")
 @click.option("--dry-run", is_flag=True, default=False, help="Show stats without pushing.")
-def main(dataset_path: str, dataset_id: str, dry_run: bool) -> None:
+def main(dataset_path: str, dataset_id: str, dataset_type: str, dry_run: bool) -> None:
     path = Path(dataset_path)
     samples = load_samples(path)
     logger.info(f"Loaded {len(samples)} samples from {path}")
 
-    hf_dataset = samples_to_hf_dataset(samples)
+    hf_dataset = samples_to_hf_dataset(samples, dataset_type=dataset_type)
 
     logger.info(f"Train: {len(hf_dataset['train'])} samples")
     logger.info(f"Test:  {len(hf_dataset['test'])} samples")
@@ -59,8 +66,13 @@ def main(dataset_path: str, dataset_id: str, dry_run: bool) -> None:
 
     logger.info("Sample (train[0]):")
     sample = hf_dataset["train"][0]
-    logger.info(f"  instruction: {sample['instruction'][:80]}...")
-    logger.info(f"  output: {sample['output'][:80]}...")
+    if dataset_type == "preference":
+        logger.info(f"  prompt: {sample['prompt'][:80]}...")
+        logger.info(f"  chosen: {sample['chosen'][:80]}...")
+        logger.info(f"  rejected: {sample['rejected'][:80]}...")
+    else:
+        logger.info(f"  instruction: {sample['instruction'][:80]}...")
+        logger.info(f"  output: {sample['output'][:80]}...")
 
     if dry_run:
         logger.info("[DRY RUN] Would push to: {}", dataset_id)

@@ -11,7 +11,7 @@
 | 3 | RAG Feature Pipeline & Semantic Search | Done |
 | 4 | RAG Retrieval & Inference | Done |
 | 5 | Instruction Dataset & SFT Training | Done |
-| 6 | DPO Preference Alignment & Evaluation | Pending |
+| 6 | DPO Preference Alignment & Evaluation | In Progress |
 | 7 | Inference Optimization & Deployment | Pending |
 | 8 | MLOps, Monitoring & Capstone | Pending |
 
@@ -48,9 +48,16 @@ graph LR
         RR["Reranker (CrossEncoder)"]
     end
 
+    subgraph "Dataset Generation (Week 5-6)"
+        DSG["DatasetGenerator"]
+        IDG["InstructionDatasetGenerator"]
+        PDG["PreferenceDatasetGenerator"]
+    end
+
     subgraph "Storage Layer"
         Mongo[(MongoDB)]
         Qdrant[(Qdrant)]
+        HF["🤗 HuggingFace Hub"]
     end
 
     GH --> D
@@ -62,6 +69,9 @@ graph LR
     Mongo --> Clean --> Chunk --> Embed --> Qdrant
     CR --> SQ --> QE --> Qdrant
     Qdrant --> RR --> CR
+    Qdrant --> DSG
+    DSG --> IDG --> HF
+    DSG --> PDG --> HF
 ```
 
 ### Tech Stack
@@ -73,7 +83,7 @@ graph LR
 | Embeddings | **all-MiniLM-L6-v2** | Sentence-level encoding (384 dimensions) |
 | Language | **Python 3.11 + Poetry** | Reproducible dependency management |
 | Containers | **Docker Compose** | Local MongoDB + Qdrant infrastructure |
-| RAG LLM | **OpenAI gpt-4o-mini** | Query expansion, self-query, evaluation (via LangChain) |
+| RAG LLM | **OpenAI gpt-4o-mini** | Query expansion, self-query, dataset generation, evaluation (via LangChain) |
 | Fine-Tuning | **Unsloth + QLoRA** | Memory-efficient 4-bit Llama 3.1 8B fine-tuning |
 | Training Infra | **AWS SageMaker** | Managed GPU training on `ml.g5.2xlarge` (NVIDIA A10G 24GB) |
 | Experiment Tracking | **Comet ML** | Hyperparameter logging, loss curves, model registry |
@@ -115,6 +125,11 @@ moodSwarm/
 │   │   │   ├── query_expansion.py    #     N query variants via OpenAI for multi-perspective search
 │   │   │   ├── reranking.py          #     CrossEncoder re-ranker (ms-marco-MiniLM-L-4-v2)
 │   │   │   └── retriever.py          #     ContextRetriever orchestrator (full RAG pipeline)
+│   │   ├── dataset/                   #   Dataset generation (Week 5-6)
+│   │   │   ├── generation.py         #     InstructionDatasetGenerator, PreferenceDatasetGenerator
+│   │   │   ├── utils.py              #     Filtering, train/test split, near-dedup, contamination checks
+│   │   │   ├── output_parsers.py     #     ListPydanticOutputParser for JSON → Pydantic
+│   │   │   └── constants.py          #     Mock responses for testing
 │   │   └── utils/                     #   split_user_full_name, batch()
 │   │
 │   ├── infrastructure/                 # External System Adapters
@@ -123,40 +138,64 @@ moodSwarm/
 │   │       └── qdrant.py              #   QdrantDatabaseConnector (Singleton)
 │   │
 │   ├── model/                          # ML Model Code
-│   │   └── finetuning/
-│   │       ├── finetune.py            #   SFT/DPO entry point (Unsloth QLoRA, Alpaca format)
-│   │       ├── sagemaker_launcher.py  #   SageMaker HuggingFace estimator launcher
-│   │       └── requirements.txt       #   GPU-specific deps (torch, unsloth, transformers)
+│   │   ├── finetuning/
+│   │   │   ├── finetune.py            #   SFT/DPO entry point (Unsloth QLoRA, Alpaca format)
+│   │   │   ├── sagemaker_launcher.py  #   SageMaker HuggingFace estimator launcher
+│   │   │   └── requirements.txt       #   GPU-specific deps (torch, unsloth, transformers)
+│   │   └── evaluation/
+│   │       ├── evaluate.py            #   LLM-as-judge evaluation (accuracy + style scoring)
+│   │       ├── sagemaker.py           #   SageMaker HuggingFaceProcessor launcher
+│   │       └── requirements.txt       #   Evaluation deps (vLLM, OpenAI)
 │   └── settings.py                     # Pydantic Settings (.env loader)
 │
 ├── pipelines/                          # ZenML Pipeline Definitions
 │   ├── smoke_test.py                  #   Verify MongoDB + Qdrant connectivity
 │   ├── digital_data_etl.py            #   get_or_create_user → crawl_links
-│   └── feature_engineering.py         #   query_data_warehouse → clean → chunk_and_embed → load_to_vector_db
+│   ├── feature_engineering.py         #   query_data_warehouse → clean → chunk_and_embed → load_to_vector_db
+│   ├── generate_datasets.py           #   query_feature_store → create_prompts → generate → [push_to_hf]
+│   ├── training.py                    #   SageMaker SFT/DPO training pipeline
+│   └── evaluating.py                  #   SageMaker model evaluation pipeline
 │
 ├── steps/                              # ZenML Step Implementations
 │   ├── etl/
 │   │   ├── get_or_create_user.py      #   User lookup/creation + metadata logging
 │   │   └── crawl_links.py             #   Dispatcher-based crawling with retry + backoff
-│   └── feature_engineering/
-│       ├── query_data_warehouse.py    #   Concurrent MongoDB fetch (ThreadPoolExecutor)
-│       ├── clean.py                   #   CleaningDispatcher per document
-│       ├── rag.py                     #   ChunkingDispatcher → EmbeddingDispatcher (batch=10)
-│       └── load_to_vector_db.py       #   group_by_class → bulk_insert to Qdrant
+│   ├── feature_engineering/
+│   │   ├── query_data_warehouse.py    #   Concurrent MongoDB fetch (ThreadPoolExecutor)
+│   │   ├── clean.py                   #   CleaningDispatcher per document
+│   │   ├── rag.py                     #   ChunkingDispatcher → EmbeddingDispatcher (batch=10)
+│   │   └── load_to_vector_db.py       #   group_by_class → bulk_insert to Qdrant
+│   ├── generate_datasets/
+│   │   ├── query_feature_store.py     #   Fetch cleaned docs from Qdrant
+│   │   ├── create_prompts.py          #   Document → prompt generation
+│   │   ├── generate_instruction_dataset.py  #   SFT instruction-answer pairs
+│   │   ├── generate_preference_dataset.py   #   DPO instruction-chosen-rejected triples
+│   │   └── push_to_huggingface.py     #   Push dataset to HuggingFace Hub
+│   ├── training/
+│   │   └── train.py                   #   SageMaker training step
+│   └── evaluating/
+│       └── evaluate.py                #   SageMaker evaluation step
 │
 ├── configs/                            # Pipeline Parameter Files
 │   ├── digital_data_etl.yaml          #   User name + list of URLs to crawl
-│   └── feature_engineering.yaml       #   Author names for feature extraction
+│   ├── feature_engineering.yaml       #   Author names for feature extraction
+│   ├── generate_instruct_datasets.yaml  #   SFT dataset generation config
+│   ├── generate_preference_datasets.yaml  #   DPO dataset generation config
+│   ├── training.yaml                  #   SageMaker training config
+│   └── evaluating.yaml               #   SageMaker evaluation config
 │
 ├── tools/                              # CLI Utilities
-│   ├── run.py                         #   Main CLI (--run-smoke-test | --run-etl | --run-feature-engineering)
+│   ├── run.py                         #   Main CLI (--run-smoke-test | --run-etl | --run-feature-engineering | --run-generate-*)
 │   ├── data_warehouse.py              #   MongoDB export/import (JSON backup/restore)
 │   ├── qdrant_inspect.py             #   Qdrant CLI (list-collections, stats, sample, semantic search)
 │   ├── chunk_analysis.py             #   Chunk validation (token distribution stats + PASS/FAIL limit check)
 │   ├── search_test.py               #   End-to-end semantic search across all embedded collections
 │   ├── rag.py                        #   Full RAG retrieval CLI (--query, --k, --mock)
 │   ├── rag_tuning.py                #   Stage latency, parameter sweep, edge cases
-│   └── rag_eval.py                  #   Recall@K + MRR evaluation on curated test set
+│   ├── rag_eval.py                  #   Recall@K + MRR evaluation on curated test set
+│   ├── dataset_inspect.py           #   Dataset stats, quality checks, LLM-as-judge eval, generation
+│   ├── push_dataset.py              #   Push instruct/preference datasets to HuggingFace Hub
+│   └── sft_report.py               #   SFT training readiness checker
 │
 ├── interview/
 │   └── INTERVIEW_QUESTIONS.md         #   41 interview Q&A derived from this codebase
@@ -164,7 +203,11 @@ moodSwarm/
 ├── docs/
 │   └── data_save_flow.html            #   Interactive visualization of the data save flow
 │
-├── data/data_warehouse_raw_data/       #   Pre-crawled JSON data for offline import
+├── data/
+│   ├── data_warehouse_raw_data/       #   Pre-crawled JSON data for offline import
+│   ├── instruct_dataset_samples.json  #   Generated SFT instruction dataset
+│   ├── preference_dataset_samples.json  #   Generated DPO preference dataset
+│   └── preference_evaluation.json     #   LLM-as-judge evaluation results
 ├── docker-compose.yml                  #   MongoDB + Qdrant containers
 └── pyproject.toml                      #   Poetry config + Poe tasks
 ```
@@ -300,6 +343,69 @@ All training metrics are automatically logged to Comet ML:
 - **Model Config:** Full `LlamaConfig` with RoPE scaling, GQA heads, vocab size
 - **Artifacts:** Conda environment, installed packages, source code, model graph
 - **PEFT Config:** LoRA rank, alpha, target modules, dropout
+
+---
+
+### 🔄 Week 6 (Part 1): DPO Preference Dataset Generation
+**Objective:** Generate preference alignment data (instruction, chosen, rejected triples) for Direct Preference Optimization training.
+
+#### What is DPO Preference Data?
+Each sample is a triple teaching the model to prefer one writing style over another:
+- **instruction** — a question about a topic from the source documents
+- **chosen** — a verbatim extract from original articles (author's blog-like writing style)
+- **rejected** — an LLM-generated answer (GPT-style, more formal/generic)
+
+This trains the model to prefer the author's casual tone over generic AI output.
+
+#### Generation Pipeline
+```mermaid
+flowchart LR
+    FS["Qdrant\ncleaned_* collections"] -->|"query_feature_store"| DOCS["7 Cleaned Documents"]
+    DOCS -->|"extract_substrings()\n1000-2000 char chunks"| PROMPTS["142 Prompts"]
+    PROMPTS -->|"GPT-4o-mini\nbatch=24"| RAW["590 Raw Samples\n(65 articles + 525 repos)"]
+    RAW -->|"filter_short_answers()\nchosen ≥ 100 chars"| F1["Filter 1"]
+    F1 -->|"filter_answer_format()\nuppercase + punctuation"| FINAL["80 Filtered Samples"]
+    FINAL -->|"train_test_split()\n88.8% / 11.2%"| SPLIT["71 Train / 9 Test"]
+    SPLIT -->|"push_to_hub()"| HF["🤗 saha2026/llmtwin-dpo"]
+```
+
+#### Dataset Statistics
+| Metric | Value |
+|--------|-------|
+| Raw samples generated | 590 (65 articles + 525 repositories) |
+| After filtering | 80 (86% rejection rate — strict format requirements on verbatim extracts) |
+| Train / Test split | 71 / 9 (88.8% / 11.2%) |
+| Instruction length | min=33, max=89, avg=54 chars |
+| Chosen answer length | min=100, max=445, avg=151 chars |
+| Generation cost | ~$0.04 (GPT-4o-mini, 109K input + 42K output tokens) |
+| Generation time | 94.8s (0.7s per prompt) |
+
+#### Quality Checks
+| Check | Result |
+|-------|--------|
+| Empty fields | 0 |
+| Short answers (<50 chars) | 0 |
+| Duplicate instructions | 1 |
+| Near-duplicates (Jaccard > 0.7) | 3 pairs |
+| Train/test contamination (Jaccard > 0.8) | 0 |
+| Keyword violations (context/extract/course) | 9 (cosmetic) |
+| Format issues | 0 |
+
+#### LLM-as-Judge Evaluation (20 samples)
+| Metric | Score | Scale |
+|--------|-------|-------|
+| Accuracy | **2.00** avg | 1=poor, 2=good, 3=excellent |
+| Style | **2.00** avg | 1=formal, 2=good, 3=excellent |
+| Accuracy distribution | 1→2, 2→16, 3→2 | |
+| Style distribution | 1→2, 2→16, 3→2 | |
+
+#### HuggingFace Dataset
+- **Repository:** [`saha2026/llmtwin-dpo`](https://huggingface.co/datasets/saha2026/llmtwin-dpo)
+- **Columns:** `prompt`, `chosen`, `rejected` (standard DPO format)
+- **Splits:** `train` (71 samples), `test` (9 samples)
+
+#### Code Changes
+- Updated `tools/push_dataset.py` — added `--dataset-type preference` flag for DPO-format push (`prompt/chosen/rejected` columns)
 
 ---
 
@@ -1108,7 +1214,40 @@ poetry run python -m tools.rag_eval --k 3
 poetry run python -m tools.rag_eval --k 6
 ```
 
-### 6. Data Backup/Restore
+### 6. Dataset Generation & Inspection
+```bash
+# Generate instruction dataset (SFT) — uses OpenAI API
+poetry run python -m tools.run --run-generate-instruct-datasets --no-cache
+
+# Generate preference dataset (DPO) — uses OpenAI API
+poetry run python -m tools.run --run-generate-preference-datasets --no-cache
+
+# Or generate via standalone tool (saves to data/ JSON)
+poetry run python -m tools.dataset_inspect generate --type preference
+poetry run python -m tools.dataset_inspect generate --type instruct --mock  # Free mock mode
+
+# Inspect dataset
+poetry run python -m tools.dataset_inspect stats --type preference
+poetry run python -m tools.dataset_inspect samples --type preference --n 5
+poetry run python -m tools.dataset_inspect quality --type preference --deep
+
+# LLM-as-judge evaluation (uses OpenAI API, ~$0.005 for 20 samples)
+poetry run python -m tools.dataset_inspect evaluate --type preference --n 20
+
+# Push to HuggingFace
+poetry run python -m tools.push_dataset \
+  --dataset-path data/preference_dataset_samples.json \
+  --dataset-id saha2026/llmtwin-dpo \
+  --dataset-type preference
+
+# Dry run (preview without pushing)
+poetry run python -m tools.push_dataset \
+  --dataset-path data/instruct_dataset_samples.json \
+  --dataset-id saha2026/llmtwin \
+  --dry-run
+```
+
+### 7. Data Backup/Restore
 ```bash
 # Export MongoDB → JSON
 poetry run python -m tools.data_warehouse --export-raw-data
@@ -1117,7 +1256,7 @@ poetry run python -m tools.data_warehouse --export-raw-data
 poetry run python -m tools.data_warehouse --import-raw-data
 ```
 
-### 7. Fine-Tune LLM on SageMaker
+### 8. Fine-Tune LLM on SageMaker
 ```bash
 # Launch SFT fine-tuning on AWS SageMaker (requires AWS credentials in .env)
 poetry run python -m llm_engineering.model.finetuning.sagemaker_launcher
@@ -1128,7 +1267,7 @@ poetry run python -m llm_engineering.model.finetuning.sagemaker_launcher
 # - AWS SageMaker Console (job status)
 ```
 
-### 8. Monitoring
+### 9. Monitoring
 ```bash
 poetry run zenml login --local
 ```
