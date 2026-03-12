@@ -34,6 +34,6 @@ class ResourceManager:
             self.sagemaker_client.describe_endpoint(EndpointName=endpoint_name)
             logger.info(f"Endpoint '{endpoint_name}' exists.")
             return True
-        except self.sagemaker_client.exceptions.ResourceNotFoundException:
+        except ClientError:
             logger.info(f"Endpoint '{endpoint_name}' does not exist.")
             return False

@@ -28,6 +28,7 @@ class SagemakerHuggingfaceStrategy(DeploymentStrategy):
         gpu_instance_type: str,
         resources: Optional[dict] = None,
         endpoint_type: enum.Enum = EndpointType.MODEL_BASED,
+        sagemaker_session=None,
     ) -> None:
         logger.info("Starting deployment using Sagemaker Huggingface Strategy...")
         logger.info(
@@ -44,6 +45,7 @@ class SagemakerHuggingfaceStrategy(DeploymentStrategy):
                 gpu_instance_type=gpu_instance_type,
                 resources=resources,
                 endpoint_type=endpoint_type,
+                sagemaker_session=sagemaker_session,
             )
             logger.info("Deployment completed successfully.")
         except Exception as e:
@@ -71,6 +73,7 @@ class DeploymentService:
         gpu_instance_type: str,
         resources: Optional[dict] = None,
         endpoint_type: enum.Enum = EndpointType.MODEL_BASED,
+        sagemaker_session=None,
     ) -> None:
         try:
             if self.resource_manager.endpoint_config_exists(endpoint_config_name=endpoint_config_name):
@@ -87,6 +90,7 @@ class DeploymentService:
                 resources=resources,
                 endpoint_type=endpoint_type,
                 gpu_instance_type=gpu_instance_type,
+                sagemaker_session=sagemaker_session,
             )
 
             logger.info(f"Successfully deployed/updated model to endpoint {endpoint_name}.")
@@ -105,11 +109,13 @@ class DeploymentService:
         gpu_instance_type: str,
         resources: Optional[dict] = None,
         endpoint_type: enum.Enum = EndpointType.MODEL_BASED,
+        sagemaker_session=None,
     ) -> None:
         huggingface_model = HuggingFaceModel(
             role=role_arn,
             image_uri=llm_image,
             env=config,
+            sagemaker_session=sagemaker_session,
         )
 
         huggingface_model.deploy(
