@@ -1,7 +1,7 @@
 parameters:
-  finetuning_type: sft
-  num_train_epochs: 3
+  finetuning_type: dpo
+  num_train_epochs: 1         # DPO uses 1 epoch (hardcoded in finetune.py:353 anyway)
   per_device_train_batch_size: 2
-  learning_rate: 3e-4
-  dataset_huggingface_workspace: mlabonne
-  is_dummy: true # Change this to 'false' to run the training with the full dataset and epochs.
+  learning_rate: 2e-6         # DPO uses 150x lower LR than SFT (hardcoded in finetune.py:355 anyway)
+  dataset_huggingface_workspace: saha2026
+  is_dummy: false

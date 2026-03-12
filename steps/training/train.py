@@ -2,7 +2,7 @@
 
 from zenml import step
 
-from llm_engineering.model.finetuning.sagemaker import run_finetuning_on_sagemaker
+from llm_engineering.model.finetuning.sagemaker_launcher import run_finetuning_on_sagemaker
 
 
 @step

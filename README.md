@@ -11,7 +11,7 @@
 | 3 | RAG Feature Pipeline & Semantic Search | Done |
 | 4 | RAG Retrieval & Inference | Done |
 | 5 | Instruction Dataset & SFT Training | Done |
-| 6 | DPO Preference Alignment & Evaluation | In Progress |
+| 6 | DPO Preference Alignment & Evaluation | Done |
 | 7 | Inference Optimization & Deployment | Pending |
 | 8 | MLOps, Monitoring & Capstone | Pending |
 
@@ -195,7 +195,8 @@ moodSwarm/
 │   ├── rag_eval.py                  #   Recall@K + MRR evaluation on curated test set
 │   ├── dataset_inspect.py           #   Dataset stats, quality checks, LLM-as-judge eval, generation
 │   ├── push_dataset.py              #   Push instruct/preference datasets to HuggingFace Hub
-│   └── sft_report.py               #   SFT training readiness checker
+│   ├── sft_report.py               #   SFT training readiness checker
+│   └── model_compare.py            #   SFT vs DPO comparison CLI (LLM-as-judge evaluation)
 │
 ├── interview/
 │   └── INTERVIEW_QUESTIONS.md         #   41 interview Q&A derived from this codebase
@@ -206,8 +207,10 @@ moodSwarm/
 ├── data/
 │   ├── data_warehouse_raw_data/       #   Pre-crawled JSON data for offline import
 │   ├── instruct_dataset_samples.json  #   Generated SFT instruction dataset
+│   ├── instruct_evaluation.json       #   SFT LLM-as-judge evaluation results
 │   ├── preference_dataset_samples.json  #   Generated DPO preference dataset
-│   └── preference_evaluation.json     #   LLM-as-judge evaluation results
+│   ├── preference_evaluation.json     #   DPO LLM-as-judge evaluation results
+│   └── sft_vs_dpo_comparison.json     #   SFT vs DPO comparison results
 ├── docker-compose.yml                  #   MongoDB + Qdrant containers
 └── pyproject.toml                      #   Poetry config + Poe tasks
 ```
@@ -406,6 +409,80 @@ flowchart LR
 
 #### Code Changes
 - Updated `tools/push_dataset.py` — added `--dataset-type preference` flag for DPO-format push (`prompt/chosen/rejected` columns)
+
+---
+
+### ✅ Week 6 (Part 2): DPO Training + SFT vs DPO Evaluation
+**Objective:** Train a DPO-aligned model on AWS SageMaker and compare SFT vs DPO quality.
+
+#### DPO Training Pipeline
+```mermaid
+flowchart LR
+    SFT["saha2026/TwinLlama-3.1-8B\n(SFT checkpoint)"] -->|"QLoRA adapters"| SM["AWS SageMaker\nml.g5.2xlarge"]
+    DS["saha2026/llmtwin-dpo\n71 train samples"] -->|"format_samples_dpo()"| SM
+    SM -->|"DPOTrainer\nbeta=0.5, lr=2e-6"| DPO["DPO Training\n1 epoch, 4 steps"]
+    DPO -->|"merge + push_to_hub"| HF["🤗 saha2026/TwinLlama-3.1-8B-DPO"]
+    DPO -->|"metrics"| COMET["☄️ Comet ML\nselective_heel_8570"]
+```
+
+#### DPO Training Configuration
+| Parameter | Value |
+|-----------|-------|
+| Base Model | `saha2026/TwinLlama-3.1-8B` (SFT checkpoint) |
+| DPO Beta | 0.5 |
+| Learning Rate | 2e-6 (150x lower than SFT) |
+| Epochs | 1 |
+| Batch Size | 2 per device |
+| Gradient Accumulation | 8 steps |
+| Optimizer | `adamw_8bit` |
+| Precision | `bfloat16` |
+| QLoRA Rank | 32, alpha=32 |
+| Target Modules | `q/k/v/o/gate/up/down_proj` (7 modules) |
+| Max Sequence Length | 1024 (prompt) + 1024 (response) |
+| Reference Model | `None` (online DPO — uses base model as implicit reference) |
+
+#### Training Results
+| Metric | Value |
+|--------|-------|
+| Training Status | SUCCESS (exit code 0) |
+| Training Steps | 4 steps, 1 epoch |
+| DPO Loss | 0.6931 → 0.7011 |
+| Rewards Accuracy | 0.0 → 0.5 |
+| Chosen Rewards | -0.009 → +0.004 |
+| Rejected Rewards | -0.002 → +0.009 |
+| Training Time | 27.2 seconds (compute only) |
+| Wall Time | 23m 43s (incl. setup, deps, model upload) |
+| Billable Cost | ~$0.60 (1324s on ml.g5.2xlarge @ $1.62/hr) |
+| Output Model | [`saha2026/TwinLlama-3.1-8B-DPO`](https://huggingface.co/saha2026/TwinLlama-3.1-8B-DPO) |
+| Comet ML | [`selective_heel_8570`](https://www.comet.com/sh-arka22/twin/a54c94dbc1284881a5f0317fbf28be8a) |
+
+#### SFT vs DPO Comparison (LLM-as-Judge Proxy)
+Since GPU inference isn't available locally, the comparison evaluates dataset answers as a proxy:
+
+| Metric | SFT Baseline | DPO Chosen | DPO Rejected |
+|--------|:------------:|:----------:|:------------:|
+| Accuracy (avg) | 2.23 | 2.05 | 1.80 |
+| Style (avg) | 2.12 | 1.95 | 1.85 |
+| Samples | 65 | 20 | 20 |
+
+**Key Findings:**
+- Chosen > Rejected on style (+0.10) and accuracy (+0.25) — preference signal is valid for DPO
+- SFT baseline scores higher than DPO chosen (expected — SFT dataset had higher-quality generated answers)
+- DPO training teaches the model to move from rejected-style → chosen-style output
+
+#### Inference Test (SageMaker)
+**Prompt:** "Write a paragraph to introduce supervised fine-tuning."
+
+**DPO Model Output:**
+> Supervised fine-tuning is a method used to enhance the performance of a pre-trained machine learning model by adjusting its parameters based on a labeled dataset. In this approach, the model is initialized with weights obtained from a larger dataset, which provides a strong baseline for the task at hand. The fine-tuning process involves retraining the model on a smaller dataset, allowing it to adapt to the specific requirements of the new task. This approach can lead to significant improvements in accuracy and performance, as the model leverages its existing knowledge while refining its parameters to better fit the new data.
+
+#### Bug Fixed
+- `steps/training/train.py` imported `llm_engineering.model.finetuning.sagemaker` but actual file is `sagemaker_launcher.py` — fixed import path
+
+#### Code Changes
+- `configs/training.yaml` — switched to `finetuning_type: dpo`, `saha2026` workspace
+- `tools/model_compare.py` — new SFT vs DPO comparison CLI
+- `steps/training/train.py` — fixed import path for sagemaker launcher
 
 ---
 
