@@ -449,19 +449,79 @@ docker compose down                                   # Stop local services
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | React Native (Expo), expo-router, Drawer navigation |
-| Backend API | FastAPI, Pydantic, Opik tracing |
-| Orchestration | ZenML pipelines |
-| Data stores | MongoDB (documents), Qdrant (vectors) |
-| Embeddings | sentence-transformers/all-MiniLM-L6-v2 (384-dim) |
-| Reranking | cross-encoder/ms-marco-MiniLM-L-4-v2 |
-| RAG | Self-query, query expansion, cross-encoder reranking |
-| Fine-tuning | Unsloth QLoRA (SFT + DPO) on Llama 3.1 8B |
-| Inference | AWS SageMaker, HuggingFace TGI, INT8 quantization |
-| CI/CD | GitHub Actions, Docker, AWS ECR |
-| Quality | Ruff, pytest, pre-commit, gitleaks |
+### Frontend
+
+| Category | Technology | Version | Purpose |
+|----------|-----------|---------|---------|
+| Framework | React Native | 0.83.2 | Cross-platform mobile/web UI |
+| Runtime | Expo | 55.0.6 | Build toolchain, dev server, managed workflow |
+| Routing | expo-router | 55.0.5 | File-based routing (app directory) |
+| Navigation | @react-navigation/drawer | 7.9.4 | Side drawer for conversation threads |
+| Animations | react-native-reanimated | 4.2.1 | Gesture-driven drawer animations |
+| Gestures | react-native-gesture-handler | 2.30.0 | Touch handling for swipes, long-press |
+| Safe Area | react-native-safe-area-context | 5.6.2 | Notch/status bar inset handling |
+| Screens | react-native-screens | 4.23.0 | Native screen containers for navigation |
+| Web | react-native-web | 0.21.0 | Web platform support |
+| Language | TypeScript | 5.9.2 | Type-safe frontend code |
+| UI Library | React | 19.2.0 | Component rendering engine |
+
+### Backend
+
+| Category | Technology | Version | Purpose |
+|----------|-----------|---------|---------|
+| **API & Server** | | | |
+| Web Framework | FastAPI | via Starlette | REST API with async support |
+| Validation | Pydantic / pydantic-settings | 2.x | Request/response models, env config |
+| Server | Uvicorn | via ZenML | ASGI server with hot reload |
+| **Data Stores** | | | |
+| Document DB | MongoDB | latest (Docker) | Raw documents, conversations, messages |
+| MongoDB Driver | PyMongo | 4.6.2 | Python MongoDB client |
+| Vector DB | Qdrant | latest (Docker) | Embeddings storage + similarity search |
+| Qdrant Client | qdrant-client | 1.8.0 | Python Qdrant client |
+| **ML / NLP** | | | |
+| Embeddings | sentence-transformers | 3.0.0 | all-MiniLM-L6-v2 (384-dim vectors) |
+| Reranking | cross-encoder | via sentence-transformers | ms-marco-MiniLM-L-4-v2 |
+| Tokenization | tiktoken | 0.12.0 | Token counting for prompts |
+| Transformers | HuggingFace transformers | 4.40.0 | Model loading, tokenizer utils |
+| Tensor Ops | PyTorch | >=2.0.0, <2.3.0 | Embedding model inference |
+| NumPy | numpy | 1.26.0 | Array operations |
+| **RAG Pipeline** | | | |
+| LLM Client | langchain-openai | 0.1.3 | OpenAI GPT-4o-mini for query expansion & self-query |
+| Text Splitting | langchain-text-splitters | 0.2.0 | RecursiveCharacterTextSplitter |
+| Community | langchain-community | 0.2.11 | CustomArticleCrawler HTML extraction |
+| **Fine-Tuning** | | | |
+| Training Library | Unsloth | (SageMaker) | QLoRA SFT + DPO on Llama 3.1 8B |
+| Dataset Mgmt | HuggingFace datasets | 4.6.1 | Dataset loading, train/test splits |
+| Hub | huggingface-hub | >=0.20.0 | Model & dataset push/pull |
+| ML Utils | scikit-learn | 1.8.0 | Train/test splitting |
+| **Inference & Deploy** | | | |
+| Cloud ML | AWS SageMaker | via boto3 | Model endpoint hosting (ml.g5.xlarge) |
+| Serving | HuggingFace TGI | v2.4.0 | Text Generation Inference container |
+| Quantization | bitsandbytes | (SageMaker) | INT8 model quantization |
+| AWS SDK | boto3 / sagemaker | <3.0.0 | Endpoint create/invoke/delete |
+| **Web Crawling** | | | |
+| Browser Automation | Selenium | 4.21.0 | Dynamic page rendering |
+| Driver Mgmt | webdriver-manager | 4.0.1 | ChromeDriver auto-install |
+| HTML Parsing | BeautifulSoup4 | 4.12.3 | HTML → text extraction |
+| Markdown | html2text | 2024.2.26 | HTML → Markdown conversion |
+| Retry Logic | tenacity | 8.x | Exponential backoff for crawlers |
+| **Orchestration** | | | |
+| Pipeline Engine | ZenML | 0.74.0 | ML pipeline orchestration |
+| Config | PyYAML | 6.0 | Pipeline YAML configs |
+| Task Runner | poethepoet | 0.29.0 | CLI task definitions |
+| CLI | Click | 8.0.1 | Command-line interfaces |
+| **Monitoring & Quality** | | | |
+| Tracing | Opik (Comet ML) | 0.2.2 | LLM call tracing, token/latency logging |
+| Logging | Loguru | 0.7.2 | Structured logging |
+| Linting | Ruff | 0.4.9 | Python lint + format |
+| Testing | pytest | 8.2.2 | Unit + integration tests |
+| Pre-commit | pre-commit | 3.7.1 | Git hooks (ruff + gitleaks) |
+| Secret Scanning | gitleaks | (pre-commit) | Prevent credential leaks |
+| **CI/CD** | | | |
+| CI | GitHub Actions | - | Lint + test on PRs |
+| CD | GitHub Actions | - | Docker build + push to ECR on main |
+| Containers | Docker | multi-stage | Python 3.11 slim production image |
+| Registry | AWS ECR | - | Container image storage |
 
 ## API Endpoints
 
