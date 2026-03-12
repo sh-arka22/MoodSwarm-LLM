@@ -12,7 +12,7 @@
 | 4 | RAG Retrieval & Inference | Done |
 | 5 | Instruction Dataset & SFT Training | Done |
 | 6 | DPO Preference Alignment & Evaluation | Done |
-| 7 | Inference Optimization & Deployment | Pending |
+| 7 | Inference Optimization & Deployment | Done |
 | 8 | MLOps, Monitoring & Capstone | Pending |
 
 ---
@@ -54,6 +54,12 @@ graph LR
         PDG["PreferenceDatasetGenerator"]
     end
 
+    subgraph "Inference Pipeline (Week 7)"
+        API["FastAPI /rag"]
+        IE["InferenceExecutor"]
+        SM["SageMaker Endpoint"]
+    end
+
     subgraph "Storage Layer"
         Mongo[(MongoDB)]
         Qdrant[(Qdrant)]
@@ -72,6 +78,9 @@ graph LR
     Qdrant --> DSG
     DSG --> IDG --> HF
     DSG --> PDG --> HF
+    API --> CR
+    CR --> IE --> SM
+    HF -.->|"DPO model + bitsandbytes INT8"| SM
 ```
 
 ### Tech Stack
@@ -87,6 +96,9 @@ graph LR
 | Fine-Tuning | **Unsloth + QLoRA** | Memory-efficient 4-bit Llama 3.1 8B fine-tuning |
 | Training Infra | **AWS SageMaker** | Managed GPU training on `ml.g5.2xlarge` (NVIDIA A10G 24GB) |
 | Experiment Tracking | **Comet ML** | Hyperparameter logging, loss curves, model registry |
+| Inference API | **FastAPI + Uvicorn** | REST endpoint (`POST /rag`) for RAG inference |
+| Inference Backend | **AWS SageMaker (Real-Time)** | HuggingFace TGI v2.2.0 container on `ml.g5.2xlarge` |
+| Quantization | **bitsandbytes INT8** | TGI-native quantization for 8B model on 24GB VRAM |
 | Observability | **Opik (Comet ML)** | LLM call tracing with `@opik.track` decorator |
 | Architecture | **DDD** | Domain-Driven Design with layered separation |
 
@@ -133,15 +145,26 @@ moodSwarm/
 │   │   └── utils/                     #   split_user_full_name, batch()
 │   │
 │   ├── infrastructure/                 # External System Adapters
-│   │   └── db/
-│   │       ├── mongo.py               #   MongoDatabaseConnector (Singleton)
-│   │       └── qdrant.py              #   QdrantDatabaseConnector (Singleton)
+│   │   ├── opik_utils.py              #   Opik/Comet ML monitoring configuration
+│   │   ├── inference_pipeline_api.py  #   FastAPI POST /rag endpoint (RAG → SageMaker inference)
+│   │   ├── db/
+│   │   │   ├── mongo.py               #   MongoDatabaseConnector (Singleton)
+│   │   │   └── qdrant.py              #   QdrantDatabaseConnector (Singleton)
+│   │   └── aws/deploy/                #   SageMaker endpoint deployment infrastructure
+│   │       ├── config.py              #     HuggingFace TGI deploy config + ResourceRequirements
+│   │       ├── sagemaker_huggingface.py  #  Strategy + Service deployment pattern
+│   │       ├── run.py                 #     create_endpoint() orchestrator
+│   │       └── delete_endpoint.py     #     Safe endpoint + config + model teardown
 │   │
 │   ├── model/                          # ML Model Code
+│   │   ├── utils.py                   #   ResourceManager — SageMaker endpoint lifecycle checks
 │   │   ├── finetuning/
 │   │   │   ├── finetune.py            #   SFT/DPO entry point (Unsloth QLoRA, Alpaca format)
 │   │   │   ├── sagemaker_launcher.py  #   SageMaker HuggingFace estimator launcher
 │   │   │   └── requirements.txt       #   GPU-specific deps (torch, unsloth, transformers)
+│   │   ├── inference/                  #   SageMaker real-time inference client
+│   │   │   ├── inference.py           #     LLMInferenceSagemakerEndpoint (boto3 runtime)
+│   │   │   └── run.py                 #     InferenceExecutor (RAG prompt → LLM → generated_text)
 │   │   └── evaluation/
 │   │       ├── evaluate.py            #   LLM-as-judge evaluation (accuracy + style scoring)
 │   │       ├── sagemaker.py           #   SageMaker HuggingFaceProcessor launcher
@@ -196,13 +219,16 @@ moodSwarm/
 │   ├── dataset_inspect.py           #   Dataset stats, quality checks, LLM-as-judge eval, generation
 │   ├── push_dataset.py              #   Push instruct/preference datasets to HuggingFace Hub
 │   ├── sft_report.py               #   SFT training readiness checker
-│   └── model_compare.py            #   SFT vs DPO comparison CLI (LLM-as-judge evaluation)
+│   ├── model_compare.py            #   SFT vs DPO comparison CLI (LLM-as-judge evaluation)
+│   ├── deploy_endpoint.py          #   SageMaker endpoint CLI (create / delete / status)
+│   └── ml_service.py               #   FastAPI uvicorn launcher (port 8000)
 │
 ├── interview/
 │   └── INTERVIEW_QUESTIONS.md         #   41 interview Q&A derived from this codebase
 │
 ├── docs/
-│   └── data_save_flow.html            #   Interactive visualization of the data save flow
+│   ├── data_save_flow.html            #   Interactive visualization of the data save flow
+│   └── week7_inference_deployment.md  #   Inference deployment config, cost analysis, commands
 │
 ├── data/
 │   ├── data_warehouse_raw_data/       #   Pre-crawled JSON data for offline import
@@ -218,6 +244,127 @@ moodSwarm/
 ---
 
 ## 📅 Engineering Journal
+
+### ✅ Week 7: Inference Optimization & Deployment
+**Objective:** Deploy the DPO-aligned model as a SageMaker real-time inference endpoint, build a FastAPI `/rag` endpoint that chains RAG retrieval with LLM generation, and add endpoint lifecycle management.
+
+#### Inference Architecture
+```mermaid
+flowchart LR
+    USER["User Query"] -->|"POST /rag"| API["FastAPI\n(inference_pipeline_api.py)"]
+    API -->|"ContextRetriever.search()"| RAG["RAG Pipeline\nSelfQuery → QueryExpansion\n→ Qdrant Search → Reranker"]
+    RAG -->|"EmbeddedChunk.to_context()"| CONTEXT["Context String"]
+    CONTEXT --> IE["InferenceExecutor\n(prompt formatting)"]
+    IE -->|"boto3 invoke_endpoint"| SM["AWS SageMaker\nml.g5.2xlarge"]
+    SM -->|"generated_text"| API
+    API -->|"JSON response"| USER
+
+    subgraph "SageMaker Endpoint"
+        TGI["HuggingFace TGI v2.2.0"]
+        MODEL["saha2026/TwinLlama-3.1-8B-DPO\nbitsandbytes INT8"]
+        TGI --> MODEL
+    end
+    SM --> TGI
+```
+
+#### Deployment Configuration
+| Parameter | Value | Purpose |
+|-----------|-------|---------|
+| Model | `saha2026/TwinLlama-3.1-8B-DPO` | DPO-aligned persona model |
+| Instance Type | `ml.g5.2xlarge` | 1× NVIDIA A10G (24GB VRAM), 8 vCPUs, 32GB RAM |
+| Container | HuggingFace TGI v2.2.0 | Text Generation Inference server |
+| Quantization | bitsandbytes INT8 | Fits 8B model in 24GB with headroom for KV cache |
+| Max Input Length | 2,048 tokens | Sufficient for RAG context + query |
+| Max Total Tokens | 4,096 tokens | Input + output combined limit |
+| Max New Tokens | 150 | Generation limit per request |
+| Temperature | 0.01 | Near-deterministic output |
+| Top P | 0.9 | Nucleus sampling threshold |
+| Health Check Timeout | 900s | Model loading + quantization time on cold start |
+
+#### Inference Pipeline Components
+
+**Domain ABCs** (`llm_engineering/domain/inference.py`):
+- `Inference` — abstract base with `set_payload()` / `inference()` — strategy pattern for swappable inference backends
+- `DeploymentStrategy` — abstract base with `deploy()` — decouples deployment logic from infrastructure
+
+**SageMaker Client** (`llm_engineering/model/inference/inference.py`):
+- `LLMInferenceSagemakerEndpoint(Inference)` — wraps boto3 `sagemaker-runtime` `invoke_endpoint`
+- JSON payload with configurable `max_new_tokens`, `temperature`, `top_p`, `return_full_text`
+- Supports optional `InferenceComponentName` for multi-model endpoints
+
+**Inference Executor** (`llm_engineering/model/inference/run.py`):
+- `InferenceExecutor` — takes LLM client + query + context
+- Formats RAG prompt: *"You are a content creator. Write what the user asked you to while using the provided context..."*
+- Calls `llm.set_payload()` → `llm.inference()` → extracts `generated_text` from response
+
+**Deploy Infrastructure** (`llm_engineering/infrastructure/aws/deploy/`):
+- `SagemakerHuggingfaceStrategy(DeploymentStrategy)` — orchestrates the full deployment flow
+- `DeploymentService` — creates `HuggingFaceModel` from image URI + env config, calls `.deploy()` with startup health check
+- `config.py` — HuggingFace TGI environment variables + `ResourceRequirements` for GPU allocation
+- `run.py` — `create_endpoint()` function: gets TGI image URI → creates ResourceManager → deploys via strategy
+- `delete_endpoint.py` — safe teardown: deletes endpoint → endpoint config → model (in order, with error handling)
+
+**ResourceManager** (`llm_engineering/model/utils.py`):
+- boto3 SageMaker client for `endpoint_config_exists()` / `endpoint_exists()` checks
+- Used during deployment to check for existing configurations
+
+**FastAPI Endpoint** (`llm_engineering/infrastructure/inference_pipeline_api.py`):
+- `POST /rag` — accepts `QueryRequest(query: str)`, returns `QueryResponse(answer: str)`
+- `rag()` — orchestrates: `ContextRetriever.search(query, k=3)` → `EmbeddedChunk.to_context()` → `call_llm_service()`
+- `call_llm_service()` — creates `LLMInferenceSagemakerEndpoint` → `InferenceExecutor.execute()`
+- Both functions decorated with `@opik.track` for Comet ML monitoring
+
+**Opik Monitoring** (`llm_engineering/infrastructure/opik_utils.py`):
+- `configure_opik()` — sets up Comet ML workspace + API key for trace collection
+- Each RAG request logs: `model_id`, `embedding_model_id`, `temperature`, query/context/answer token counts
+- Tagged as `["rag"]` for filtering in Comet ML dashboard
+
+#### CLI Tools
+
+```bash
+# Deploy endpoint (~5-15 min startup, ~$1.62/hr while running)
+poetry run python -m tools.deploy_endpoint create
+
+# Check endpoint status (Creating → InService → Failed)
+poetry run python -m tools.deploy_endpoint status
+
+# Start FastAPI server on port 8000
+poetry run python -m tools.ml_service
+
+# Test the RAG endpoint
+curl -X POST http://localhost:8000/rag \
+  -H "Content-Type: application/json" \
+  -d '{"query": "How do RAG systems work?"}'
+
+# CRITICAL: Delete endpoint when done (stops billing!)
+poetry run python -m tools.deploy_endpoint delete
+```
+
+#### Cost Analysis
+| Item | Cost | Notes |
+|------|------|-------|
+| Endpoint (running) | ~$1.62/hr | `ml.g5.2xlarge` on-demand pricing |
+| Per day (if left on) | ~$38.88/day | **Must delete when done** |
+| Endpoint creation | Free | Pay only for instance uptime |
+| Cold start | 5-15 minutes | Model download + quantization + health check |
+
+#### Code Changes Summary
+| File | Change |
+|------|--------|
+| `llm_engineering/settings.py` | Added 13 inference settings (endpoint names, token limits, generation params), updated `HF_MODEL_ID` to `saha2026/TwinLlama-3.1-8B-DPO` |
+| `llm_engineering/application/utils/misc.py` | Added `compute_num_tokens()` using `AutoTokenizer` for Opik token tracking |
+| `llm_engineering/domain/__init__.py` | Added `inference` module to domain exports |
+| `llm_engineering/domain/inference.py` | **New** — ABC: `Inference`, `DeploymentStrategy` |
+| `llm_engineering/model/utils.py` | **New** — `ResourceManager` for SageMaker endpoint lifecycle |
+| `llm_engineering/model/inference/` | **New** — `LLMInferenceSagemakerEndpoint` + `InferenceExecutor` |
+| `llm_engineering/infrastructure/opik_utils.py` | **New** — Opik/Comet ML monitoring configuration |
+| `llm_engineering/infrastructure/inference_pipeline_api.py` | **New** — FastAPI `POST /rag` with Opik tracing |
+| `llm_engineering/infrastructure/aws/deploy/` | **New** — Full SageMaker deployment infra (config, strategy, service, teardown) |
+| `tools/deploy_endpoint.py` | **New** — CLI for create/delete/status endpoint management |
+| `tools/ml_service.py` | **New** — FastAPI uvicorn launcher |
+| `docs/week7_inference_deployment.md` | **New** — Deployment documentation |
+
+---
 
 ### ✅ Week 5: SFT Fine-Tuning on AWS SageMaker
 **Objective:** Fine-tune Meta Llama 3.1 8B using Supervised Fine-Tuning (SFT) with QLoRA on AWS SageMaker, producing a persona-aware writing assistant (TwinLlama).
@@ -625,6 +772,35 @@ graph TD
     H --> |"EmbeddingDispatcher (batch=10)"| I["EmbeddedChunks (384-dim)"]
     I --> E2[load_to_vector_db]
     E2 --> F2["Qdrant: embedded_* collections"]
+```
+
+### Inference Pipeline (Week 7)
+```mermaid
+sequenceDiagram
+    participant User
+    participant API as FastAPI /rag
+    participant RAG as ContextRetriever
+    participant Qdrant as Qdrant (vectors)
+    participant IE as InferenceExecutor
+    participant SM as SageMaker Endpoint
+
+    User->>API: POST /rag {"query": "..."}
+    API->>RAG: search(query, k=3)
+    RAG->>RAG: SelfQuery (extract author)
+    RAG->>RAG: QueryExpansion (N variants)
+    RAG->>Qdrant: Parallel vector search (k/3 per collection)
+    Qdrant-->>RAG: EmbeddedChunks
+    RAG->>RAG: Reranker (CrossEncoder top-k)
+    RAG-->>API: top-k documents
+    API->>API: EmbeddedChunk.to_context()
+    API->>IE: InferenceExecutor(llm, query, context)
+    IE->>IE: Format RAG prompt
+    IE->>SM: boto3 invoke_endpoint (JSON)
+    SM-->>IE: {"generated_text": "..."}
+    IE-->>API: answer string
+    API-->>User: {"answer": "..."}
+
+    Note over API,SM: @opik.track logs model_id, token counts, temperature
 ```
 
 ---

@@ -41,8 +41,24 @@ class Settings(BaseSettings):
     # --- Optional settings used to tweak the code. ---
 
     # LLM model
-    HF_MODEL_ID: str = "mlabonne/TwinLlama-3.1-8B-DPO"
+    HF_MODEL_ID: str = "saha2026/TwinLlama-3.1-8B-DPO"
     GPU_INSTANCE_TYPE: str = "ml.g5.2xlarge"
+
+    # SageMaker Inference Endpoint
+    SAGEMAKER_ENDPOINT_INFERENCE: str = "twin"
+    SAGEMAKER_ENDPOINT_CONFIG_INFERENCE: str = "twin"
+    SM_NUM_GPUS: int = 1
+    MAX_INPUT_LENGTH: int = 2048
+    MAX_TOTAL_TOKENS: int = 4096
+    MAX_BATCH_TOTAL_TOKENS: int = 4096
+    COPIES: int = 1
+    GPUS: int = 1
+    CPUS: int = 4
+
+    # Inference generation parameters
+    TEMPERATURE_INFERENCE: float = 0.01
+    TOP_P_INFERENCE: float = 0.9
+    MAX_NEW_TOKENS_INFERENCE: int = 150
 
     # RAG
     TEXT_EMBEDDING_MODEL_ID: str = "sentence-transformers/all-MiniLM-L6-v2"
