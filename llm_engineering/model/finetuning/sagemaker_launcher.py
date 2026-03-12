@@ -35,6 +35,7 @@ def run_finetuning_on_sagemaker(
     assert settings.AWS_SECRET_KEY, "AWS Secret Key is required."
 
     import os
+
     os.environ["AWS_DEFAULT_REGION"] = settings.AWS_REGION
     os.environ["AWS_ACCESS_KEY_ID"] = settings.AWS_ACCESS_KEY
     os.environ["AWS_SECRET_ACCESS_KEY"] = settings.AWS_SECRET_KEY

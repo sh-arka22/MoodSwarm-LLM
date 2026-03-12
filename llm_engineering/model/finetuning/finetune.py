@@ -80,7 +80,13 @@ def finetune(
     lora_alpha: int = 32,
     lora_dropout: float = 0.0,
     target_modules: List[str] = [  # noqa: B006
-        "q_proj", "k_proj", "v_proj", "up_proj", "down_proj", "o_proj", "gate_proj"
+        "q_proj",
+        "k_proj",
+        "v_proj",
+        "up_proj",
+        "down_proj",
+        "o_proj",
+        "gate_proj",
     ],
     chat_template: str = "chatml",
     learning_rate: float = 3e-4,
@@ -91,8 +97,14 @@ def finetune(
     is_dummy: bool = False,
 ) -> tuple:
     model, tokenizer = load_model(
-        model_name, max_seq_length, load_in_4bit,
-        lora_rank, lora_alpha, lora_dropout, target_modules, chat_template,
+        model_name,
+        max_seq_length,
+        load_in_4bit,
+        lora_rank,
+        lora_alpha,
+        lora_dropout,
+        target_modules,
+        chat_template,
     )
     EOS_TOKEN = tokenizer.eos_token
     print(f"Setting EOS_TOKEN to {EOS_TOKEN}")  # noqa
@@ -224,6 +236,7 @@ def _patch_dynamic_cache() -> None:
     but transformers <4.50 doesn't recognize it. Patch the valid list so validation passes."""
     try:
         from transformers.generation.configuration_utils import ALL_CACHE_IMPLEMENTATIONS
+
         if "dynamic" not in ALL_CACHE_IMPLEMENTATIONS:
             ALL_CACHE_IMPLEMENTATIONS.append("dynamic")
     except ImportError:
@@ -242,9 +255,7 @@ def inference(
     inputs = tokenizer([message], return_tensors="pt").to("cuda")
 
     text_streamer = TextStreamer(tokenizer)
-    _ = model.generate(
-        **inputs, streamer=text_streamer, max_new_tokens=max_new_tokens
-    )
+    _ = model.generate(**inputs, streamer=text_streamer, max_new_tokens=max_new_tokens)
 
 
 def save_model(
@@ -261,9 +272,7 @@ def save_model(
         model.push_to_hub_merged(repo_id, tokenizer, save_method="merged_16bit")
 
 
-def check_if_huggingface_model_exists(
-    model_id: str, default_value: str = "mlabonne/TwinLlama-3.1-8B"
-) -> str:
+def check_if_huggingface_model_exists(model_id: str, default_value: str = "mlabonne/TwinLlama-3.1-8B") -> str:
     api = HfApi()
     try:
         api.model_info(model_id)
@@ -285,11 +294,16 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_huggingface_workspace", type=str, default="mlabonne")
     parser.add_argument("--model_output_huggingface_workspace", type=str, default="mlabonne")
     parser.add_argument(
-        "--is_dummy", type=bool, default=False,
+        "--is_dummy",
+        type=bool,
+        default=False,
         help="Flag to reduce the dataset size for testing",
     )
     parser.add_argument(
-        "--finetuning_type", type=str, choices=["sft", "dpo"], default="sft",
+        "--finetuning_type",
+        type=str,
+        choices=["sft", "dpo"],
+        default="sft",
         help="Parameter to choose the finetuning stage.",
     )
 
@@ -326,21 +340,20 @@ if __name__ == "__main__":
             learning_rate=args.learning_rate,
             is_dummy=args.is_dummy,
         )
-        sft_output_model_repo_id = (
-            f"{args.model_output_huggingface_workspace}/TwinLlama-3.1-8B"
-        )
+        sft_output_model_repo_id = f"{args.model_output_huggingface_workspace}/TwinLlama-3.1-8B"
         save_model(
-            model, tokenizer, "model_sft",
-            push_to_hub=True, repo_id=sft_output_model_repo_id,
+            model,
+            tokenizer,
+            "model_sft",
+            push_to_hub=True,
+            repo_id=sft_output_model_repo_id,
         )
         inference(model, tokenizer)
 
     elif args.finetuning_type == "dpo":
         print("Starting DPO training...")  # noqa
 
-        sft_base_model_repo_id = (
-            f"{args.model_output_huggingface_workspace}/TwinLlama-3.1-8B"
-        )
+        sft_base_model_repo_id = f"{args.model_output_huggingface_workspace}/TwinLlama-3.1-8B"
         sft_base_model_repo_id = check_if_huggingface_model_exists(sft_base_model_repo_id)
         print(f"Training from base model '{sft_base_model_repo_id}'")  # noqa
 
@@ -355,11 +368,12 @@ if __name__ == "__main__":
             learning_rate=2e-6,
             is_dummy=args.is_dummy,
         )
-        dpo_output_model_repo_id = (
-            f"{args.model_output_huggingface_workspace}/TwinLlama-3.1-8B-DPO"
-        )
+        dpo_output_model_repo_id = f"{args.model_output_huggingface_workspace}/TwinLlama-3.1-8B-DPO"
         save_model(
-            model, tokenizer, "model_dpo",
-            push_to_hub=True, repo_id=dpo_output_model_repo_id,
+            model,
+            tokenizer,
+            "model_dpo",
+            push_to_hub=True,
+            repo_id=dpo_output_model_repo_id,
         )
         inference(model, tokenizer)

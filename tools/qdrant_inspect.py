@@ -22,9 +22,7 @@ def list_collections():
     click.echo("-" * 67)
     for col in sorted(collections, key=lambda c: c.name):
         info = connection.get_collection(col.name)
-        click.echo(
-            f"{col.name:<30} {info.points_count:>10} {info.indexed_vectors_count:>12} {info.status.value:<10}"
-        )
+        click.echo(f"{col.name:<30} {info.points_count:>10} {info.indexed_vectors_count:>12} {info.status.value:<10}")
     click.echo()
 
 

@@ -19,10 +19,7 @@ def search_all(query_text: str, k: int = 3) -> list:
     query = Query.from_str(query_text)
     embedded_query: EmbeddedQuery = EmbeddingDispatcher.dispatch(query)
 
-    logger.info(
-        f"Query embedded: dim={len(embedded_query.embedding)}, "
-        f"content='{embedded_query.content[:80]}...'"
-    )
+    logger.info(f"Query embedded: dim={len(embedded_query.embedding)}, " f"content='{embedded_query.content[:80]}...'")
 
     all_results = []
     for cls in EMBEDDED_CLASSES:

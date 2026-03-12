@@ -116,9 +116,7 @@ class EmbeddingDispatcher:
             return []
 
         data_category = data_model[0].get_category()
-        assert all(
-            dm.get_category() == data_category for dm in data_model
-        ), "Data models must be of the same category."
+        assert all(dm.get_category() == data_category for dm in data_model), "Data models must be of the same category."
         handler = cls.factory.create_handler(data_category)
 
         embedded_chunk_model = handler.embed_batch(data_model)

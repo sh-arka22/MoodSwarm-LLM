@@ -27,18 +27,14 @@ def generate_preference_dataset(
     datasets = dataset_generator.generate(prompts, test_size=test_split_size, mock=mock)
 
     step_context = get_step_context()
-    step_context.add_output_metadata(
-        output_name="preference_datasets", metadata=_get_metadata(datasets)
-    )
+    step_context.add_output_metadata(output_name="preference_datasets", metadata=_get_metadata(datasets))
 
     return datasets
 
 
 def _get_metadata(datasets: PreferenceTrainTestSplit) -> dict[str, Any]:
     preference_dataset_categories = list(datasets.train.keys())
-    train_num_samples = {
-        category: pref_dataset.num_samples for category, pref_dataset in datasets.train.items()
-    }
+    train_num_samples = {category: pref_dataset.num_samples for category, pref_dataset in datasets.train.items()}
     test_num_samples = {category: pref_dataset.num_samples for category, pref_dataset in datasets.test.items()}
 
     return {

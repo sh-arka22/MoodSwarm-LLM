@@ -53,6 +53,6 @@ Context: {context}
                 },
             )
             full_text = self.llm.inference()[0]["generated_text"]
-            answer = full_text[len(input_text):]
+            answer = full_text[len(input_text) :]
 
         return answer.strip()

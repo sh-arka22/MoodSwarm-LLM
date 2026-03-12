@@ -73,9 +73,7 @@ def evaluate_answer(instruction: str, answer: str, client: OpenAI | None = None)
     return json.loads(completion.choices[0].message.content)
 
 
-def _evaluate_batch(
-    batch: list[tuple[str, str]], start_index: int, client: OpenAI
-) -> list[tuple[int, dict]]:
+def _evaluate_batch(batch: list[tuple[str, str]], start_index: int, client: OpenAI) -> list[tuple[int, dict]]:
     """Evaluate a batch of (instruction, answer) pairs."""
     results = []
     for i, (instruction, answer) in enumerate(batch, start=start_index):
@@ -84,7 +82,9 @@ def _evaluate_batch(
             results.append((i, result))
         except Exception as e:
             logger.warning(f"Failed to evaluate sample {i}: {e}")
-            results.append((i, {"accuracy": {"analysis": "error", "score": 0}, "style": {"analysis": "error", "score": 0}}))
+            results.append(
+                (i, {"accuracy": {"analysis": "error", "score": 0}, "style": {"analysis": "error", "score": 0}})
+            )
     return results
 
 

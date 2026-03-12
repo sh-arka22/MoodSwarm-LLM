@@ -26,26 +26,31 @@ def samples_to_hf_dataset(samples: list[dict], dataset_type: str = "instruct") -
 
     if not test_samples:
         from sklearn.model_selection import train_test_split
-        train_samples, test_samples = train_test_split(
-            samples, test_size=0.1, random_state=42
-        )
+
+        train_samples, test_samples = train_test_split(samples, test_size=0.1, random_state=42)
 
     def to_hf(samples_list: list[dict]) -> Dataset:
         if dataset_type == "preference":
-            return Dataset.from_dict({
-                "prompt": [s["instruction"] for s in samples_list],
-                "chosen": [s["chosen"] for s in samples_list],
-                "rejected": [s["rejected"] for s in samples_list],
-            })
-        return Dataset.from_dict({
-            "instruction": [s["instruction"] for s in samples_list],
-            "output": [s["answer"] for s in samples_list],
-        })
+            return Dataset.from_dict(
+                {
+                    "prompt": [s["instruction"] for s in samples_list],
+                    "chosen": [s["chosen"] for s in samples_list],
+                    "rejected": [s["rejected"] for s in samples_list],
+                }
+            )
+        return Dataset.from_dict(
+            {
+                "instruction": [s["instruction"] for s in samples_list],
+                "output": [s["answer"] for s in samples_list],
+            }
+        )
 
-    return DatasetDict({
-        "train": to_hf(train_samples),
-        "test": to_hf(test_samples),
-    })
+    return DatasetDict(
+        {
+            "train": to_hf(train_samples),
+            "test": to_hf(test_samples),
+        }
+    )
 
 
 @click.command(help="Push a dataset to HuggingFace Hub.")

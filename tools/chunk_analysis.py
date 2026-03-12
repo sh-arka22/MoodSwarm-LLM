@@ -25,7 +25,9 @@ def _scroll_all_points(collection_name: str) -> list:
 
 
 @click.command(help="Analyze chunk statistics for embedded_* Qdrant collections.")
-@click.option("--collection", default=None, help="Specific collection to analyze. Defaults to all embedded_* collections.")
+@click.option(
+    "--collection", default=None, help="Specific collection to analyze. Defaults to all embedded_* collections."
+)
 @click.option("--max-tokens", default=256, help="Max allowed tokens per chunk (embedding model limit).")
 def main(collection: str | None, max_tokens: int):
     from llm_engineering.application.networks.embeddings import EmbeddingModelSingleton
@@ -73,8 +75,12 @@ def main(collection: str | None, max_tokens: int):
         click.echo(f"\n{'='*60}")
         click.echo(f"Collection: {col_name}  ({len(records)} chunks)")
         click.echo(f"{'='*60}")
-        click.echo(f"  Characters:  min={min(char_lengths):>6}  max={max(char_lengths):>6}  avg={sum(char_lengths)/len(char_lengths):>8.1f}")
-        click.echo(f"  Tokens:      min={min(token_counts):>6}  max={max(token_counts):>6}  avg={sum(token_counts)/len(token_counts):>8.1f}")
+        click.echo(
+            f"  Characters:  min={min(char_lengths):>6}  max={max(char_lengths):>6}  avg={sum(char_lengths)/len(char_lengths):>8.1f}"
+        )
+        click.echo(
+            f"  Tokens:      min={min(token_counts):>6}  max={max(token_counts):>6}  avg={sum(token_counts)/len(token_counts):>8.1f}"
+        )
 
         if over_limit:
             all_pass = False

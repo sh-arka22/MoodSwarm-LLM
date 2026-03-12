@@ -76,6 +76,7 @@ def check_credentials(check_hf: bool = False, check_aws: bool = False) -> dict:
     if check_hf and settings.HUGGINGFACE_ACCESS_TOKEN:
         try:
             from huggingface_hub import HfApi
+
             api = HfApi()
             user = api.whoami(token=settings.HUGGINGFACE_ACCESS_TOKEN)
             creds["HF_USER"] = user["name"]
@@ -86,6 +87,7 @@ def check_credentials(check_hf: bool = False, check_aws: bool = False) -> dict:
     if check_aws and settings.AWS_ARN_ROLE:
         try:
             import boto3
+
             sts = boto3.client("sts")
             identity = sts.get_caller_identity()
             creds["AWS_ACCOUNT"] = identity["Account"]
@@ -108,7 +110,9 @@ def main(check_hf: bool, check_aws: bool) -> None:
     logger.info(f"[Dataset] Status: {ds['status']}")
     if ds["status"] == "OK":
         logger.info(f"  Total: {ds['total']} | Train: {ds['train']} | Test: {ds['test']}")
-        logger.info(f"  Avg instruction: {ds['avg_instruction_len']:.0f} chars | Avg answer: {ds['avg_answer_len']:.0f} chars")
+        logger.info(
+            f"  Avg instruction: {ds['avg_instruction_len']:.0f} chars | Avg answer: {ds['avg_answer_len']:.0f} chars"
+        )
     logger.info("")
 
     # 2. Configs
@@ -139,6 +143,7 @@ def main(check_hf: bool, check_aws: bool) -> None:
     training_config = ROOT_DIR / "configs" / "training.yaml"
     if training_config.exists():
         import yaml
+
         with training_config.open() as f:
             config = yaml.safe_load(f)
         params = config.get("parameters", {})
@@ -153,7 +158,9 @@ def main(check_hf: bool, check_aws: bool) -> None:
         logger.success("All checks passed. Ready for training.")
         logger.info("")
         logger.info("Next steps:")
-        logger.info("  1. Push dataset:  poetry run python -m tools.push_dataset --dataset-path data/instruct_dataset_samples.json --dataset-id <user>/llmtwin --dry-run")
+        logger.info(
+            "  1. Push dataset:  poetry run python -m tools.push_dataset --dataset-path data/instruct_dataset_samples.json --dataset-id <user>/llmtwin --dry-run"
+        )
         logger.info("  2. Run training:  poetry run python -m tools.run --run-training --no-cache")
         logger.info("  3. Run eval:      poetry run python -m tools.run --run-evaluation --no-cache")
     else:

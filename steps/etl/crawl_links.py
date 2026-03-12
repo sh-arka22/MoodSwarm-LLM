@@ -48,8 +48,7 @@ def _crawl_link(dispatcher: CrawlerDispatcher, link: str, user: UserDocument) ->
     wait=wait_exponential(multiplier=2, min=2, max=30),
     retry=retry_if_exception_type((ConnectionError, TimeoutError, OSError)),
     before_sleep=lambda retry_state: logger.warning(
-        f"Crawl attempt {retry_state.attempt_number} failed, retrying in "
-        f"{retry_state.next_action.sleep:.1f}s..."
+        f"Crawl attempt {retry_state.attempt_number} failed, retrying in " f"{retry_state.next_action.sleep:.1f}s..."
     ),
     reraise=True,
 )

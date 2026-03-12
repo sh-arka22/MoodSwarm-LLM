@@ -75,9 +75,7 @@ def main(max_samples: int, skip_eval: bool, threads: int) -> None:
         from llm_engineering.model.evaluation.evaluate import evaluate_dataset
 
         t0 = time.perf_counter()
-        chosen_evals = evaluate_dataset(
-            pref_subset, answer_key="chosen", num_threads=threads, max_samples=max_samples
-        )
+        chosen_evals = evaluate_dataset(pref_subset, answer_key="chosen", num_threads=threads, max_samples=max_samples)
         click.echo(f"    Done in {time.perf_counter() - t0:.1f}s")
         chosen_acc = [e["accuracy"]["score"] for e in chosen_evals if e]
         chosen_sty = [e["style"]["score"] for e in chosen_evals if e]
@@ -134,7 +132,9 @@ def main(max_samples: int, skip_eval: bool, threads: int) -> None:
     click.echo(header)
     click.echo(f"  {'─'*67}")
 
-    click.echo(f"  {'Accuracy (avg)':.<25} {_avg(sft_acc):>14.2f} {_avg(chosen_acc):>14.2f} {_avg(rejected_acc):>14.2f}")
+    click.echo(
+        f"  {'Accuracy (avg)':.<25} {_avg(sft_acc):>14.2f} {_avg(chosen_acc):>14.2f} {_avg(rejected_acc):>14.2f}"
+    )
     click.echo(f"  {'Style (avg)':.<25} {_avg(sft_sty):>14.2f} {_avg(chosen_sty):>14.2f} {_avg(rejected_sty):>14.2f}")
     click.echo(f"  {'Samples evaluated':.<25} {len(sft_acc):>14} {len(chosen_acc):>14} {len(rejected_acc):>14}")
 
@@ -144,9 +144,12 @@ def main(max_samples: int, skip_eval: bool, threads: int) -> None:
     click.echo(f"  {'─'*67}")
 
     for label, scores_list in [
-        ("SFT Accuracy", sft_acc), ("SFT Style", sft_sty),
-        ("DPO Chosen Accuracy", chosen_acc), ("DPO Chosen Style", chosen_sty),
-        ("DPO Rejected Accuracy", rejected_acc), ("DPO Rejected Style", rejected_sty),
+        ("SFT Accuracy", sft_acc),
+        ("SFT Style", sft_sty),
+        ("DPO Chosen Accuracy", chosen_acc),
+        ("DPO Chosen Style", chosen_sty),
+        ("DPO Rejected Accuracy", rejected_acc),
+        ("DPO Rejected Style", rejected_sty),
     ]:
         dist = _score_distribution(scores_list)
         click.echo(f"  {label:<25}  1={dist[1]:<4} 2={dist[2]:<4} 3={dist[3]:<4}")
@@ -193,7 +196,7 @@ def main(max_samples: int, skip_eval: bool, threads: int) -> None:
         r_sty = rejected_sty[i] if i < len(rejected_sty) else 0
         winner = "chosen" if (c_acc + c_sty) >= (r_acc + r_sty) else "rejected"
         click.echo(f"    [{i}] chosen(a={c_acc},s={c_sty}) vs rejected(a={r_acc},s={r_sty}) -> {winner}")
-        click.echo(f"        \"{instr}...\"")
+        click.echo(f'        "{instr}..."')
 
     # --- Save comparison ---
     comparison = {

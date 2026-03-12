@@ -66,7 +66,9 @@ def stats(dataset_type: str) -> None:
     # Word count stats
     instr_words = [len(s["instruction"].split()) for s in samples]
     ans_words = [len(s[answer_key].split()) for s in samples]
-    click.echo(f"  Instruction words: min={min(instr_words)}  max={max(instr_words)}  avg={sum(instr_words)//len(instr_words)}")
+    click.echo(
+        f"  Instruction words: min={min(instr_words)}  max={max(instr_words)}  avg={sum(instr_words)//len(instr_words)}"
+    )
     click.echo(f"  Answer words:      min={min(ans_words)}  max={max(ans_words)}  avg={sum(ans_words)//len(ans_words)}")
     click.echo(f"{'='*70}\n")
 
@@ -85,7 +87,9 @@ def samples(dataset_type: str, n: int, split: str) -> None:
     answer_key = "answer" if dataset_type == "instruct" else "chosen"
 
     click.echo(f"\n{'='*70}")
-    click.echo(f"DATASET SAMPLES [{dataset_type.upper()}, split={split}, showing {min(n, len(all_samples))}/{len(all_samples)}]")
+    click.echo(
+        f"DATASET SAMPLES [{dataset_type.upper()}, split={split}, showing {min(n, len(all_samples))}/{len(all_samples)}]"
+    )
     click.echo(f"{'='*70}")
 
     for i, s in enumerate(all_samples[:n]):
@@ -128,7 +132,7 @@ def quality(dataset_type: str, deep: bool) -> None:
     if short_ans:
         issues.append(f"{len(short_ans)} short answers")
         for idx in short_ans[:3]:
-            click.echo(f"      Sample {idx}: \"{all_samples[idx][answer_key][:80]}\"")
+            click.echo(f'      Sample {idx}: "{all_samples[idx][answer_key][:80]}"')
 
     # Check 3: Duplicate instructions
     instructions = [s["instruction"].strip().lower() for s in all_samples]
@@ -232,9 +236,7 @@ def evaluate(dataset_type: str, max_samples: int, threads: int) -> None:
     click.echo(f"{'='*70}")
 
     t0 = time.perf_counter()
-    evaluations = evaluate_dataset(
-        all_samples, answer_key=answer_key, num_threads=threads, max_samples=max_samples
-    )
+    evaluations = evaluate_dataset(all_samples, answer_key=answer_key, num_threads=threads, max_samples=max_samples)
     elapsed = time.perf_counter() - t0
 
     # Compute aggregate scores
@@ -270,14 +272,16 @@ def evaluate(dataset_type: str, max_samples: int, threads: int) -> None:
     eval_path = path.parent / f"{dataset_type}_evaluation.json"
     eval_data = []
     for i, ev in enumerate(evaluations):
-        eval_data.append({
-            "index": i,
-            "instruction": all_samples[i]["instruction"],
-            "accuracy_score": ev["accuracy"]["score"] if ev else 0,
-            "accuracy_analysis": ev["accuracy"]["analysis"] if ev else "",
-            "style_score": ev["style"]["score"] if ev else 0,
-            "style_analysis": ev["style"]["analysis"] if ev else "",
-        })
+        eval_data.append(
+            {
+                "index": i,
+                "instruction": all_samples[i]["instruction"],
+                "accuracy_score": ev["accuracy"]["score"] if ev else 0,
+                "accuracy_analysis": ev["accuracy"]["analysis"] if ev else "",
+                "style_score": ev["style"]["score"] if ev else 0,
+                "style_analysis": ev["style"]["analysis"] if ev else "",
+            }
+        )
     with eval_path.open("w") as f:
         json.dump(eval_data, f, indent=2)
     click.echo(f"\n  Saved evaluations to: {eval_path}")
