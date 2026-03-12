@@ -97,7 +97,7 @@ graph LR
 | Training Infra | **AWS SageMaker** | Managed GPU training on `ml.g5.2xlarge` (NVIDIA A10G 24GB) |
 | Experiment Tracking | **Comet ML** | Hyperparameter logging, loss curves, model registry |
 | Inference API | **FastAPI + Uvicorn** | REST endpoint (`POST /rag`) for RAG inference |
-| Inference Backend | **AWS SageMaker (Real-Time)** | HuggingFace TGI v2.2.0 container on `ml.g5.2xlarge` |
+| Inference Backend | **AWS SageMaker (Real-Time)** | HuggingFace TGI v2.4.0 container on `ml.g5.xlarge` |
 | Quantization | **bitsandbytes INT8** | TGI-native quantization for 8B model on 24GB VRAM |
 | Observability | **Opik (Comet ML)** | LLM call tracing with `@opik.track` decorator |
 | Architecture | **DDD** | Domain-Driven Design with layered separation |
@@ -255,12 +255,12 @@ flowchart LR
     API -->|"ContextRetriever.search()"| RAG["RAG Pipeline\nSelfQuery → QueryExpansion\n→ Qdrant Search → Reranker"]
     RAG -->|"EmbeddedChunk.to_context()"| CONTEXT["Context String"]
     CONTEXT --> IE["InferenceExecutor\n(prompt formatting)"]
-    IE -->|"boto3 invoke_endpoint"| SM["AWS SageMaker\nml.g5.2xlarge"]
+    IE -->|"boto3 invoke_endpoint"| SM["AWS SageMaker\nml.g5.xlarge"]
     SM -->|"generated_text"| API
     API -->|"JSON response"| USER
 
     subgraph "SageMaker Endpoint"
-        TGI["HuggingFace TGI v2.2.0"]
+        TGI["HuggingFace TGI v2.4.0"]
         MODEL["saha2026/TwinLlama-3.1-8B-DPO\nbitsandbytes INT8"]
         TGI --> MODEL
     end
@@ -271,14 +271,15 @@ flowchart LR
 | Parameter | Value | Purpose |
 |-----------|-------|---------|
 | Model | `saha2026/TwinLlama-3.1-8B-DPO` | DPO-aligned persona model |
-| Instance Type | `ml.g5.2xlarge` | 1× NVIDIA A10G (24GB VRAM), 8 vCPUs, 32GB RAM |
-| Container | HuggingFace TGI v2.2.0 | Text Generation Inference server |
+| Instance Type | `ml.g5.xlarge` | 1× NVIDIA A10G (24GB VRAM), 4 vCPUs, 16GB RAM |
+| Container | HuggingFace TGI v2.4.0 | Text Generation Inference server |
 | Quantization | bitsandbytes INT8 | Fits 8B model in 24GB with headroom for KV cache |
-| Max Input Length | 2,048 tokens | Sufficient for RAG context + query |
+| Max Input Length | 3,072 tokens | Sufficient for RAG context + query |
 | Max Total Tokens | 4,096 tokens | Input + output combined limit |
 | Max New Tokens | 150 | Generation limit per request |
 | Temperature | 0.01 | Near-deterministic output |
 | Top P | 0.9 | Nucleus sampling threshold |
+| Prompt Template | Alpaca format | Model requires `### Instruction:` / `### Response:` wrapping |
 | Health Check Timeout | 900s | Model loading + quantization time on cold start |
 
 #### Inference Pipeline Components
@@ -294,7 +295,8 @@ flowchart LR
 
 **Inference Executor** (`llm_engineering/model/inference/run.py`):
 - `InferenceExecutor` — takes LLM client + query + context
-- Formats RAG prompt: *"You are a content creator. Write what the user asked you to while using the provided context..."*
+- Formats RAG prompt in **Alpaca template** (`### Instruction:` / `### Response:`) — critical: model produces zero tokens without this wrapper
+- Includes fallback: if `return_full_text: False` returns empty, retries with `return_full_text: True` and strips input prefix
 - Calls `llm.set_payload()` → `llm.inference()` → extracts `generated_text` from response
 
 **Deploy Infrastructure** (`llm_engineering/infrastructure/aws/deploy/`):
@@ -322,7 +324,7 @@ flowchart LR
 #### CLI Tools
 
 ```bash
-# Deploy endpoint (~5-15 min startup, ~$1.62/hr while running)
+# Deploy endpoint (~5-15 min startup, ~$1.20/hr while running)
 poetry run python -m tools.deploy_endpoint create
 
 # Check endpoint status (Creating → InService → Failed)
@@ -340,13 +342,32 @@ curl -X POST http://localhost:8000/rag \
 poetry run python -m tools.deploy_endpoint delete
 ```
 
+#### Deployment Issues Encountered
+| # | Error | Fix |
+|---|-------|-----|
+| 1 | `ValueError: Must setup local AWS configuration with a region` | Created explicit `boto3.Session(region_name=...)` → passed `sagemaker_session` through deploy chain |
+| 2 | `ResourceLimitExceeded` for ml.g5.2xlarge | Switched to `ml.g5.xlarge` (same GPU, had quota=1) |
+| 3 | `ModelWrapper` tokenizer parse error | Upgraded TGI from v2.2.0 to v2.4.0 |
+| 4 | CUDA OOM with `MAX_TOTAL_TOKENS=8192` | Reduced to `MAX_INPUT=3072`, `MAX_TOTAL=4096` |
+| 5 | Empty `generated_text` (zero tokens) | Added Alpaca template wrapper to prompt |
+| 6 | `ResourceNotFoundException` in `endpoint_exists()` | Changed to catch `ClientError` instead |
+
 #### Cost Analysis
 | Item | Cost | Notes |
 |------|------|-------|
-| Endpoint (running) | ~$1.62/hr | `ml.g5.2xlarge` on-demand pricing |
-| Per day (if left on) | ~$38.88/day | **Must delete when done** |
+| Endpoint (running) | ~$1.20/hr | `ml.g5.xlarge` on-demand pricing |
+| Per day (if left on) | ~$28.80/day | **Must delete when done** |
 | Endpoint creation | Free | Pay only for instance uptime |
 | Cold start | 5-15 minutes | Model download + quantization + health check |
+
+#### End-to-End Test Results (2026-03-12)
+| Step | Result |
+|------|--------|
+| Endpoint deploy | ~8 minutes cold start → `InService` |
+| Query: "How do RAG systems work?" | 150-token answer about encoder-decoder architecture and attention mechanisms |
+| Query: "What is supervised fine-tuning?" | Context-grounded answer referencing project content (Mistral, QLORA, Comet ML) |
+| Endpoint teardown | Deleted endpoint + config + model in 2 seconds |
+| Test cost | ~$0.20 (~10 minutes on ml.g5.xlarge @ $1.20/hr) |
 
 #### Code Changes Summary
 | File | Change |
