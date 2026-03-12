@@ -13,7 +13,7 @@
 | 5 | Instruction Dataset & SFT Training | Done |
 | 6 | DPO Preference Alignment & Evaluation | Done |
 | 7 | Inference Optimization & Deployment | Done |
-| 8 | MLOps, Monitoring & Capstone | Pending |
+| 8 | MLOps, CI/CD & Capstone | Done |
 
 ---
 
@@ -100,7 +100,78 @@ graph LR
 | Inference Backend | **AWS SageMaker (Real-Time)** | HuggingFace TGI v2.4.0 container on `ml.g5.xlarge` |
 | Quantization | **bitsandbytes INT8** | TGI-native quantization for 8B model on 24GB VRAM |
 | Observability | **Opik (Comet ML)** | LLM call tracing with `@opik.track` decorator |
+| CI/CD | **GitHub Actions** | Automated lint, test, Docker build on PR/merge |
+| Containerization | **Docker** | Production image with Chrome + Poetry |
+| Testing | **pytest** | Unit + integration test suite |
+| Pre-commit | **ruff + gitleaks** | Lint, format, and secret scanning hooks |
 | Architecture | **DDD** | Domain-Driven Design with layered separation |
+
+---
+
+## 🚀 Running the Application
+
+### Prerequisites
+- Docker running locally (for MongoDB + Qdrant)
+- AWS credentials configured (for SageMaker endpoint)
+- `.env` file with required API keys (see `llm_engineering/settings.py`)
+
+### Quick Start
+
+**1. Start local services** (free)
+```bash
+docker compose up -d
+```
+
+**2. Deploy the SageMaker inference endpoint** (~$1.20/hr)
+```bash
+poetry poe deploy-endpoint
+```
+Wait 5-10 minutes for the endpoint to reach `InService` status:
+```bash
+poetry poe endpoint-status
+```
+
+**3. Start the FastAPI server**
+```bash
+poetry poe start-api
+# Server runs on http://localhost:8000
+```
+
+**4. Open the interactive API docs in your browser**
+
+Go to **http://localhost:8000/docs** — FastAPI auto-generates a Swagger UI.
+
+- Click the `POST /rag` endpoint
+- Click **"Try it out"**
+- Enter a query:
+  ```json
+  {
+    "query": "How do RAG systems work?"
+  }
+  ```
+- Hit **Execute** to get the LLM's response
+
+Or use curl:
+```bash
+curl -X POST http://localhost:8000/rag \
+  -H "Content-Type: application/json" \
+  -d '{"query": "How do RAG systems work?"}'
+```
+
+**5. Delete the endpoint when done**
+```bash
+poetry poe delete-endpoint
+```
+
+### Cost Warning
+
+| Resource | Cost | When Active |
+|----------|------|-------------|
+| SageMaker `ml.g5.xlarge` | ~$1.20/hr | Only while endpoint is deployed |
+| MongoDB + Qdrant (Docker) | Free | Local containers |
+| FastAPI server | Free | Local process |
+
+A 30-minute demo costs ~$0.60. **Forgetting to delete the endpoint = ~$29/day.** Always run `poetry poe delete-endpoint` when finished.
 
 ---
 
@@ -244,6 +315,35 @@ moodSwarm/
 ---
 
 ## 📅 Engineering Journal
+
+### ✅ Week 8: MLOps, CI/CD & Capstone
+**Objective:** Make the system production-ready with Docker containerization, GitHub Actions CI/CD, pytest test suite, pre-commit hooks, and operations runbooks.
+
+#### CI/CD Pipeline
+```mermaid
+flowchart LR
+    PR["Pull Request"] --> QA["QA Job\n(ruff lint + format)"]
+    PR --> TEST["Test Job\n(pytest suite)"]
+    MERGE["Merge to main"] --> BUILD["Docker Build"] --> ECR["Push to AWS ECR"]
+```
+
+#### What Was Built
+- **Pre-commit hooks:** ruff lint/format + gitleaks secret scanning
+- **Pytest suite:** 6 test files (4 unit + 1 integration + conftest), covering domain models, chunking, inference executor, settings, FastAPI schema
+- **Dockerfile:** Multi-stage Python 3.11 slim + Chrome + Poetry production image
+- **GitHub Actions CI:** QA (lint + format) + Test jobs on all PRs
+- **GitHub Actions CD:** Docker build + push to AWS ECR on main merge
+- **Operations runbook:** Deploy checklist, rollback procedures, incident response, cost management
+- **Poe tasks:** `lint-check`, `format-check`, `test`, `deploy-endpoint`, `delete-endpoint`, `endpoint-status`, `start-api`
+
+#### Verified Results
+- `poetry poe lint-check` — PASS
+- `poetry poe test` — all tests pass — PASS
+- `docker build -t moodswarm .` — builds successfully — PASS
+- CI/CD YAML valid — PASS
+- Pre-commit hooks installed and passing — PASS
+
+---
 
 ### ✅ Week 7: Inference Optimization & Deployment
 **Objective:** Deploy the DPO-aligned model as a SageMaker real-time inference endpoint, build a FastAPI `/rag` endpoint that chains RAG retrieval with LLM generation, and add endpoint lifecycle management.

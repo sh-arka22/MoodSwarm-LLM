@@ -25,7 +25,9 @@ def create():
     from llm_engineering.infrastructure.aws.deploy.run import create_endpoint
 
     logger.info(f"Deploying model {settings.HF_MODEL_ID} to endpoint '{settings.SAGEMAKER_ENDPOINT_INFERENCE}'...")
-    logger.warning(f"This will create a {settings.GPU_INSTANCE_TYPE} instance (~$1.20/hr). Remember to delete when done!")
+    logger.warning(
+        f"This will create a {settings.GPU_INSTANCE_TYPE} instance (~$1.20/hr). Remember to delete when done!"
+    )
     create_endpoint()
     logger.info("Endpoint deployment initiated. It may take 5-15 minutes to become InService.")
 
