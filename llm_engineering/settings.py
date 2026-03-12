@@ -42,13 +42,13 @@ class Settings(BaseSettings):
 
     # LLM model
     HF_MODEL_ID: str = "saha2026/TwinLlama-3.1-8B-DPO"
-    GPU_INSTANCE_TYPE: str = "ml.g5.2xlarge"
+    GPU_INSTANCE_TYPE: str = "ml.g5.xlarge"
 
     # SageMaker Inference Endpoint
     SAGEMAKER_ENDPOINT_INFERENCE: str = "twin"
     SAGEMAKER_ENDPOINT_CONFIG_INFERENCE: str = "twin"
     SM_NUM_GPUS: int = 1
-    MAX_INPUT_LENGTH: int = 2048
+    MAX_INPUT_LENGTH: int = 3072
     MAX_TOTAL_TOKENS: int = 4096
     MAX_BATCH_TOTAL_TOKENS: int = 4096
     COPIES: int = 1
