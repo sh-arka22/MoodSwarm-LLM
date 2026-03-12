@@ -115,6 +115,26 @@ class NoSQLBaseDocument(BaseModel, Generic[T], ABC):
             return []
 
     @classmethod
+    def delete(cls: Type[T], **filter_options) -> bool:
+        collection = _database[cls.get_collection_name()]
+        try:
+            result = collection.delete_one(filter_options)
+            return result.deleted_count > 0
+        except errors.OperationFailure:
+            logger.error("Failed to delete document")
+            return False
+
+    @classmethod
+    def bulk_delete(cls: Type[T], **filter_options) -> int:
+        collection = _database[cls.get_collection_name()]
+        try:
+            result = collection.delete_many(filter_options)
+            return result.deleted_count
+        except errors.OperationFailure:
+            logger.error("Failed to delete documents")
+            return 0
+
+    @classmethod
     def get_collection_name(cls: Type[T]) -> str:
         if not hasattr(cls, "Settings") or not hasattr(cls.Settings, "name"):
             raise ImproperlyConfigured(
