@@ -1,0 +1,17 @@
+.git
+__pycache__
+*.pyc
+*.pyo
+.env
+.env.*
+.ruff_cache
+.venv
+memory/
+data/
+*.egg-info
+.pytest_cache
+.mypy_cache
+docs/
+tests/
+.github/
+.pre-commit-config.yaml

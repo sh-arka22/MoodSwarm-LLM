@@ -87,3 +87,19 @@ run-training = "poetry run python -m tools.run --run-training --no-cache"
 run-evaluation = "poetry run python -m tools.run --run-evaluation --no-cache"
 sft-report = "poetry run python -m tools.sft_report"
 push-dataset = "poetry run python -m tools.push_dataset"
+
+# CI/CD tasks (Week 8)
+lint-check = "poetry run ruff check ."
+lint-fix = "poetry run ruff check . --fix"
+format-check = "poetry run ruff format --check ."
+format-fix = "poetry run ruff format ."
+test = { cmd = "poetry run pytest tests/", env = { OPIK_TRACK_DISABLE = "true" } }
+
+# Inference & deployment (Week 7-8)
+deploy-endpoint = "poetry run python -m tools.deploy_endpoint create"
+delete-endpoint = "poetry run python -m tools.deploy_endpoint delete"
+endpoint-status = "poetry run python -m tools.deploy_endpoint status"
+start-api = "poetry run python -m tools.ml_service"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
